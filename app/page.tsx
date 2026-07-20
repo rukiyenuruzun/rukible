@@ -111,8 +111,41 @@ export default function Home() {
 
   const [elapsed, setElapsed] = useState(0);
 
+  const [panelWidth, setPanelWidth] = useState(380);
+  const [confirmVersion, setConfirmVersion] = useState<string | null>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const draggingRef = useRef(false);
+
+  // Panel genişliğini hatırla.
+  useEffect(() => {
+    const saved = Number(localStorage.getItem("rukible_panel"));
+    if (saved >= 300 && saved <= 720) setPanelWidth(saved);
+  }, []);
+
+  // Ayırıcıyı sürükleme.
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!draggingRef.current) return;
+      const w = Math.min(720, Math.max(300, e.clientX));
+      setPanelWidth(w);
+    }
+    function onUp() {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      localStorage.setItem("rukible_panel", String(panelWidth));
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [panelWidth]);
 
   /** Harcama özetini tazeler — açılışta ve her üretimden sonra. */
   const refreshUsage = useCallback(() => {
@@ -257,10 +290,14 @@ export default function Home() {
     const target = await ensureProject(text);
 
     try {
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: nextMessages, currentHtml: html || undefined }),
+        signal: controller.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -343,11 +380,50 @@ export default function Home() {
 
       setMessages([...nextMessages, { role: "assistant", content: reply, tone }]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Beklenmeyen bir hata oluştu.");
+      // Kullanıcı durdurduysa bu bir hata değil.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setMessages([
+          ...nextMessages,
+          { role: "assistant", content: "Durduruldu.", tone: "warn" },
+        ]);
+      } else {
+        setError(err instanceof Error ? err.message : "Beklenmeyen bir hata oluştu.");
+      }
     } finally {
+      abortRef.current = null;
       setStreaming(false);
       setStatus("");
       refreshUsage();
+    }
+  }
+
+  /**
+   * Üretimi durdurur.
+   *
+   * Not: istek sunucuda başladıysa model o ana kadar ürettiği için ücret
+   * yansıyabilir. Durdurmak beklemeyi bitirir, faturayı geri almaz.
+   */
+  function stop() {
+    abortRef.current?.abort();
+  }
+
+  /** Tek bir versiyonu siler. */
+  async function removeVersion(id: string) {
+    const res = await fetch(`/api/versions/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      setError(await res.text());
+      return;
+    }
+    const kalan = versions.filter((v) => v.id !== id);
+    setVersions(kalan);
+    setConfirmVersion(null);
+
+    // Görüntülenen versiyonu sildiysek en yeniye dön.
+    if (versionId === id) {
+      const next = kalan[0];
+      setHtml(next?.html ?? "");
+      setVersionId(next?.id ?? null);
+      setShareUrl(null);
     }
   }
 
@@ -439,15 +515,18 @@ export default function Home() {
   return (
     <main className="flex h-screen bg-[#fff7f3] text-stone-700">
       {/* SOL — sohbet */}
-      <section className="flex w-[380px] shrink-0 flex-col">
+      <section
+        style={{ width: panelWidth }}
+        className="flex shrink-0 flex-col overflow-hidden"
+      >
         <header className="px-7 py-6">
-          <div className="flex items-center gap-2.5">
-            <Logo />
+          <div className="flex items-center gap-3">
+            <Logo size={30} />
             <div className="leading-none">
-              <div className="text-[17px] font-semibold tracking-tight text-stone-800">
+              <div className="text-[23px] font-semibold tracking-tight text-stone-800">
                 Rukible
               </div>
-              <div className="mt-1 text-[11px] text-orange-400">{SLOGAN}</div>
+              <div className="mt-1.5 text-[12px] text-orange-400">{SLOGAN}</div>
             </div>
           </div>
 
@@ -689,19 +768,41 @@ export default function Home() {
               placeholder="Nasıl bir sayfa olsun?"
               className="w-full resize-none overflow-y-auto bg-transparent px-3 py-2 text-[13px] leading-relaxed text-stone-700 outline-none placeholder:text-stone-300"
             />
-            <button
-              onClick={() => send()}
-              disabled={streaming || !input.trim()}
-              className="w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
-            >
-              {streaming ? "Çiziliyor…" : "Gönder"}
-            </button>
+            {streaming ? (
+              <button
+                onClick={stop}
+                className="w-full rounded-2xl bg-stone-200 py-2.5 text-[13px] font-medium text-stone-700 transition hover:bg-stone-300"
+              >
+                Durdur
+              </button>
+            ) : (
+              <button
+                onClick={() => send()}
+                disabled={!input.trim()}
+                className="w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
+              >
+                Gönder
+              </button>
+            )}
           </div>
         </div>
       </section>
 
+      {/* Ayırıcı — sürükleyerek genişlik ayarlanır */}
+      <div
+        onMouseDown={() => {
+          draggingRef.current = true;
+          document.body.style.cursor = "col-resize";
+          document.body.style.userSelect = "none";
+        }}
+        title="Sürükleyerek genişliği ayarla"
+        className="group relative w-1.5 shrink-0 cursor-col-resize"
+      >
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-stone-200 transition group-hover:w-0.5 group-hover:bg-orange-300" />
+      </div>
+
       {/* SAĞ — önizleme */}
-      <section className="flex flex-1 flex-col pr-4">
+      <section className="flex min-w-0 flex-1 flex-col pr-4">
         <header className="flex items-center justify-between gap-4 py-6 pl-2 pr-4">
           <div className="flex gap-1 rounded-full bg-white/70 p-1 text-xs">
             <button
@@ -752,20 +853,57 @@ export default function Home() {
         {versions.length > 0 && (
           <div className="flex flex-wrap gap-1.5 pb-3 pl-2 text-[11px]">
             <span className="py-1 text-stone-400">Geçmiş</span>
-            {versions.map((v, i) => (
-              <button
-                key={v.id}
-                onClick={() => restore(v)}
-                title={v.prompt ?? ""}
-                className={`rounded-lg px-2.5 py-1 transition ${
-                  v.id === versionId
-                    ? "bg-orange-400 font-medium text-white"
-                    : "bg-white text-stone-600 hover:bg-orange-100 hover:text-stone-900"
-                }`}
-              >
-                v{versions.length - i} · {clock(v.created_at)}
-              </button>
-            ))}
+            {versions.map((v, i) =>
+              confirmVersion === v.id ? (
+                <span
+                  key={v.id}
+                  className="flex items-center gap-1 rounded-lg bg-rose-50 px-1.5 py-1"
+                >
+                  <button
+                    onClick={() => removeVersion(v.id)}
+                    className="rounded px-1.5 text-rose-700 transition hover:bg-rose-200"
+                  >
+                    sil
+                  </button>
+                  <button
+                    onClick={() => setConfirmVersion(null)}
+                    className="rounded px-1.5 text-stone-500 transition hover:text-stone-800"
+                  >
+                    vazgeç
+                  </button>
+                </span>
+              ) : (
+                <span
+                  key={v.id}
+                  className={`group flex items-center rounded-lg transition ${
+                    v.id === versionId
+                      ? "bg-orange-400 text-white"
+                      : "bg-white text-stone-600 hover:bg-orange-100"
+                  }`}
+                >
+                  <button
+                    onClick={() => restore(v)}
+                    title={v.prompt ?? ""}
+                    className={`px-2.5 py-1 ${
+                      v.id === versionId ? "font-medium" : "hover:text-stone-900"
+                    }`}
+                  >
+                    v{versions.length - i} · {clock(v.created_at)}
+                  </button>
+                  <button
+                    onClick={() => setConfirmVersion(v.id)}
+                    title="Bu versiyonu sil"
+                    className={`px-1.5 text-[13px] leading-none opacity-0 transition group-hover:opacity-100 ${
+                      v.id === versionId
+                        ? "text-white/70 hover:text-white"
+                        : "text-stone-400 hover:text-rose-600"
+                    }`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ),
+            )}
           </div>
         )}
 
