@@ -66,12 +66,26 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
+  const [elapsed, setElapsed] = useState(0);
+
   const scrollRef = useRef<HTMLDivElement>(null);
-  const throttleRef = useRef<number>(0);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, streaming]);
+
+  // Uzun süren üretimlerde "takıldı mı" hissini önlemek için geçen süre sayacı.
+  useEffect(() => {
+    if (!streaming) {
+      setElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - started) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [streaming]);
 
   // Açılışta projeleri yükle. 503 gelirse Supabase yok demektir —
   // araç yine çalışır, sadece kayıt tutmaz.
@@ -214,16 +228,10 @@ export default function Home() {
           }
           if (msg.c) {
             accumulated += msg.c;
-            if (mode === "edit") {
-              setStatus("Değişiklik hazırlanıyor…");
-            } else {
-              setStatus("Sayfa yazılıyor…");
-              const now = Date.now();
-              if (now - throttleRef.current > 300) {
-                throttleRef.current = now;
-                setHtml(extractHtml(accumulated));
-              }
-            }
+            // Önizlemeyi akış sırasında GÜNCELLEMİYORUZ. Yarım HTML basmak
+            // iframe'i her seferinde yeniden yükletiyor; ekran titriyor ve
+            // sayfa bozukmuş gibi görünüyor. Sonucu bir kerede basıyoruz.
+            setStatus(mode === "edit" ? "Değişiklik hazırlanıyor…" : "Sayfa yazılıyor…");
           }
         }
       }
@@ -556,15 +564,41 @@ export default function Home() {
           </div>
         )}
 
-        <div className="flex flex-1 justify-center overflow-auto pb-6 pl-2">
-          <iframe
-            title="Önizleme"
-            srcDoc={html || EMPTY_STATE}
-            sandbox="allow-scripts"
-            className={`h-full rounded-3xl bg-white shadow-[0_2px_16px_rgba(120,80,60,0.08)] transition-all ${
+        <div className="flex flex-1 justify-center overflow-hidden pb-6 pl-2">
+          <div
+            className={`relative h-full transition-all ${
               mobileView ? "w-[390px]" : "w-full"
             }`}
-          />
+          >
+            <iframe
+              title="Önizleme"
+              srcDoc={html || EMPTY_STATE}
+              sandbox="allow-scripts"
+              className={`h-full w-full rounded-3xl bg-white shadow-[0_2px_16px_rgba(120,80,60,0.08)] transition-opacity duration-500 ${
+                streaming ? "opacity-40" : "opacity-100"
+              }`}
+            />
+
+            {streaming && (
+              <div className="absolute inset-0 grid place-items-center rounded-3xl bg-[#fff7f3]/70 backdrop-blur-[2px]">
+                <div className="flex flex-col items-center gap-3">
+                  <span className="h-7 w-7 animate-spin rounded-full border-2 border-orange-200 border-t-orange-400" />
+                  <span className="text-[13px] text-stone-500">
+                    {status || "Çiziliyor…"}
+                  </span>
+                  <span className="text-[11px] tabular-nums text-stone-400">
+                    {Math.floor(elapsed / 60)}:
+                    {String(elapsed % 60).padStart(2, "0")}
+                  </span>
+                  {elapsed > 45 && (
+                    <span className="max-w-[220px] text-center text-[11px] leading-relaxed text-stone-400">
+                      Yeni sayfa üretimi birkaç dakika sürebilir, sorun yok.
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </section>
     </main>
