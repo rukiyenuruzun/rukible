@@ -4,13 +4,23 @@ import { useState } from "react";
 import { Logo, SLOGAN } from "../logo";
 
 export default function Giris() {
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!password || busy) return;
+    if (busy) return;
+
+    // Değeri React state'ten değil, formun kendisinden okuyoruz.
+    // Tarayıcı şifreyi otomatik doldurduğunda React'in onChange olayı
+    // tetiklenmiyor; state boş kalıyor ve giriş imkânsız hale geliyordu.
+    const form = e.currentTarget;
+    const password = String(new FormData(form).get("password") ?? "");
+    if (!password) {
+      setError("Şifre alanı boş.");
+      return;
+    }
+
     setBusy(true);
     setError("");
 
@@ -24,7 +34,7 @@ export default function Giris() {
       window.location.href = "/";
     } else {
       setError(await res.text());
-      setPassword("");
+      form.reset();
       setBusy(false);
     }
   }
@@ -44,8 +54,8 @@ export default function Giris() {
 
         <input
           type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          name="password"
+          autoComplete="current-password"
           placeholder="Şifre"
           autoFocus
           className="w-full rounded-2xl bg-white/80 px-4 py-3 text-[13px] text-stone-700 outline-none placeholder:text-stone-300 focus:bg-white"
@@ -53,7 +63,7 @@ export default function Giris() {
 
         <button
           type="submit"
-          disabled={busy || !password}
+          disabled={busy}
           className="mt-2 w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
         >
           {busy ? "Kontrol ediliyor…" : "Gir"}
