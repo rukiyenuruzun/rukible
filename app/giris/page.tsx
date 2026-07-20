@@ -1,67 +1,28 @@
-"use client";
-
-import { useState } from "react";
 import { Logo, SLOGAN } from "../logo";
 
-export default function Giris() {
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+/**
+ * Giriş ekranı.
+ *
+ * Bilerek bir sunucu bileşeni ve düz HTML formu: JavaScript yüklenmese veya
+ * hata verse bile giriş çalışmak zorunda. Aksi halde kullanıcı dışarıda kalır.
+ */
+export default async function Giris({
+  searchParams,
+}: {
+  searchParams: Promise<{ hata?: string }>;
+}) {
+  const { hata } = await searchParams;
 
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (busy) return;
-
-    // Değeri React state'ten değil, formun kendisinden okuyoruz.
-    // Tarayıcı şifreyi otomatik doldurduğunda React'in onChange olayı
-    // tetiklenmiyor; state boş kalıyor ve giriş imkânsız hale geliyordu.
-    const form = e.currentTarget;
-    const password = String(new FormData(form).get("password") ?? "");
-    if (!password) {
-      setError("Şifre alanı boş.");
-      return;
-    }
-
-    setBusy(true);
-    setError("");
-
-    try {
-      const res = await fetch("/api/giris", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
-        credentials: "same-origin",
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        setError(`${text} (kod ${res.status})`);
-        form.reset();
-        setBusy(false);
-        return;
-      }
-
-      // Çerez gerçekten yazıldı mı kontrol et. Yazılmadıysa tarayıcı çerezi
-      // engelliyordur; yönlendirsek sonsuz döngüye gireriz.
-      const landed = await fetch("/api/projects", { credentials: "same-origin" });
-      if (landed.status === 307 || landed.redirected) {
-        setError(
-          "Şifre doğru ama tarayıcı giriş çerezini saklamadı. " +
-            "Gizli sekmedeysen normal sekmede dene, ya da bu site için çerezlere izin ver.",
-        );
-        setBusy(false);
-        return;
-      }
-
-      window.location.href = "/";
-    } catch {
-      setError("Sunucuya ulaşılamadı. Bağlantını kontrol et.");
-      setBusy(false);
-    }
-  }
+  const mesaj =
+    hata === "sifre"
+      ? "Şifre yanlış."
+      : hata === "kurulum"
+        ? "Sunucuda APP_PASSWORD tanımlı değil."
+        : "";
 
   return (
     <main className="grid h-screen place-items-center bg-[#fff7f3] px-6">
-      <form onSubmit={submit} className="w-full max-w-[280px]">
+      <form method="POST" action="/api/giris" className="w-full max-w-[280px]">
         <div className="mb-8 flex items-center gap-2.5">
           <Logo size={26} />
           <div className="leading-none">
@@ -83,14 +44,13 @@ export default function Giris() {
 
         <button
           type="submit"
-          disabled={busy}
-          className="mt-2 w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
+          className="mt-2 w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500"
         >
-          {busy ? "Kontrol ediliyor…" : "Gir"}
+          Gir
         </button>
 
-        {error && (
-          <p className="mt-3 text-center text-[12px] text-rose-600">{error}</p>
+        {mesaj && (
+          <p className="mt-3 text-center text-[12px] text-rose-600">{mesaj}</p>
         )}
       </form>
     </main>
