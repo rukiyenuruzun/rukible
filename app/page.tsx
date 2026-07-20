@@ -4,7 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Logo, SLOGAN } from "./logo";
 import { applyPatches } from "@/lib/patch";
 
-type ChatMessage = { role: "user" | "assistant"; content: string };
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  /** Bitiş mesajını renklendirmek için: iş tamamlandı mı, kısmen mi. */
+  tone?: "ok" | "warn";
+};
 type Project = { id: string; title: string; updated_at: string };
 type Version = {
   id: string;
@@ -65,6 +70,8 @@ export default function Home() {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
 
   const [elapsed, setElapsed] = useState(0);
 
@@ -99,8 +106,13 @@ export default function Home() {
         if (!data) return;
         setDbReady(true);
         setProjects(data.projects ?? []);
+        // Sayfa yenilendiğinde son çalışılan proje kendiliğinden açılsın —
+        // aksi halde her yenilemede her şey kaybolmuş gibi görünüyor.
+        const latest = data.projects?.[0];
+        if (latest) loadProject(latest.id);
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadProject = useCallback(async (id: string) => {
@@ -236,7 +248,8 @@ export default function Home() {
         }
       }
 
-      let reply = "Hazır, sağda görebilirsin ✳︎";
+      let reply = "Sayfa hazır — sağda görebilirsin.";
+      let tone: "ok" | "warn" = "ok";
       let finalHtml = "";
 
       if (mode === "edit") {
@@ -246,10 +259,12 @@ export default function Home() {
         setNotes((prev) => [...prev, ...result.notes]);
         if (result.applied === 0) {
           reply = "Değişikliği uygulayamadım — isteği biraz daha net yazar mısın?";
+          tone = "warn";
         } else if (result.failed > 0) {
           reply = `${result.applied} değişiklik uygulandı, ${result.failed} tanesi tutmadı.`;
+          tone = "warn";
         } else {
-          reply = "Değişiklik uygulandı ✳︎";
+          reply = "Değişiklik uygulandı.";
         }
         if (result.applied > 0) await saveVersion(target, finalHtml, text, spent);
       } else {
@@ -258,7 +273,7 @@ export default function Home() {
         await saveVersion(target, finalHtml, text, spent);
       }
 
-      setMessages([...nextMessages, { role: "assistant", content: reply }]);
+      setMessages([...nextMessages, { role: "assistant", content: reply, tone }]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Beklenmeyen bir hata oluştu.");
     } finally {
@@ -306,6 +321,25 @@ export default function Home() {
     a.download = "sayfa.html";
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  /** Proje adını değiştirir. */
+  async function renameProject(id: string) {
+    const title = editingTitle.trim();
+    setEditingId(null);
+    if (!title) return;
+
+    const res = await fetch(`/api/projects/${id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    if (!res.ok) {
+      setError(await res.text());
+      return;
+    }
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, title } : p)));
+    setProject((prev) => (prev && prev.id === id ? { ...prev, title } : prev));
   }
 
   /** Projeyi ve tüm versiyonlarını siler. Geri alınamaz. */
@@ -373,16 +407,32 @@ export default function Home() {
                 <p className="text-[11px] text-stone-400">Henüz proje yok</p>
               )}
               {projects.map((p) => (
-                <div key={p.id} className="group flex items-center gap-1">
-                  <button
-                    onClick={() => {
-                      setConfirmDelete(null);
-                      loadProject(p.id);
-                    }}
-                    className="min-w-0 flex-1 truncate rounded-xl px-3 py-1.5 text-left text-[12px] text-stone-500 transition hover:bg-white/70 hover:text-stone-800"
-                  >
-                    {p.title}
-                  </button>
+                <div key={p.id} className="flex items-center gap-1">
+                  {editingId === p.id ? (
+                    <input
+                      value={editingTitle}
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") renameProject(p.id);
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                      onBlur={() => renameProject(p.id)}
+                      autoFocus
+                      className="min-w-0 flex-1 rounded-xl bg-white px-3 py-1.5 text-[12px] text-stone-800 outline-none"
+                    />
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setConfirmDelete(null);
+                        loadProject(p.id);
+                      }}
+                      className={`min-w-0 flex-1 truncate rounded-xl px-3 py-1.5 text-left text-[12px] transition hover:bg-white/70 hover:text-stone-800 ${
+                        project?.id === p.id ? "text-stone-800" : "text-stone-500"
+                      }`}
+                    >
+                      {p.title}
+                    </button>
+                  )}
 
                   {confirmDelete === p.id ? (
                     <span className="flex shrink-0 items-center gap-1 pr-1">
@@ -400,13 +450,28 @@ export default function Home() {
                       </button>
                     </span>
                   ) : (
-                    <button
-                      onClick={() => setConfirmDelete(p.id)}
-                      title="Projeyi sil"
-                      className="shrink-0 px-2 text-[13px] leading-none text-stone-300 opacity-0 transition group-hover:opacity-100 hover:text-rose-500"
-                    >
-                      ×
-                    </button>
+                    editingId !== p.id && (
+                      <span className="flex shrink-0 items-center">
+                        <button
+                          onClick={() => {
+                            setEditingId(p.id);
+                            setEditingTitle(p.title);
+                            setConfirmDelete(null);
+                          }}
+                          title="Adını değiştir"
+                          className="px-1.5 text-[11px] text-stone-300 transition hover:text-stone-600"
+                        >
+                          adlandır
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(p.id)}
+                          title="Projeyi sil"
+                          className="px-1.5 text-[13px] leading-none text-stone-300 transition hover:text-rose-500"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    )
                   )}
                 </div>
               ))}
@@ -438,6 +503,18 @@ export default function Home() {
               >
                 {m.content}
               </div>
+            ) : m.tone ? (
+              <p
+                key={i}
+                className={`flex items-start gap-2 rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${
+                  m.tone === "ok"
+                    ? "bg-emerald-50 text-emerald-800"
+                    : "bg-amber-50 text-amber-800"
+                }`}
+              >
+                <span aria-hidden="true">{m.tone === "ok" ? "✓" : "!"}</span>
+                {m.content}
+              </p>
             ) : (
               <p key={i} className="text-[13px] leading-relaxed text-stone-400">
                 {m.content}
