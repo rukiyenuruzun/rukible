@@ -31,3 +31,16 @@ export const MAX_EDIT_TOKENS = 4000;
 export const REASONING_EFFORT = "low";
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
+/**
+ * Paylaşım linklerinde kullanılacak asıl adres.
+ *
+ * Vercel her deploy için ayrı bir önizleme adresi üretir ve bunları kendi
+ * girişiyle korur. Paylaşım linki bulunduğun adresi baz alırsa, önizleme
+ * adresindeyken ürettiğin link karşı taraftan Vercel girişi ister.
+ * Bu ayar tanımlıysa link her zaman asıl adresle üretilir.
+ *
+ * Vercel'de ortam değişkeni olarak ekle:
+ *   NEXT_PUBLIC_SITE_URL = https://rukible.vercel.app
+ */
+export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "";

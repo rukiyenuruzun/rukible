@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Logo, SLOGAN } from "./logo";
 import { applyPatches } from "@/lib/patch";
+import { SITE_URL } from "@/lib/config";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -322,7 +323,10 @@ export default function Home() {
       return;
     }
     const { slug } = await res.json();
-    setShareUrl(`${window.location.origin}/p/${slug}`);
+    // Önizleme adresindeysek bile link asıl adresle üretilsin — aksi halde
+    // karşı taraf Vercel girişi ister.
+    const base = (SITE_URL || window.location.origin).replace(/\/+$/, "");
+    setShareUrl(`${base}/p/${slug}`);
     setCopied(false);
   }
 
