@@ -105,6 +105,15 @@ export default function Home() {
   const [elapsed, setElapsed] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  /** Yazdıkça çubuğu büyütür, belli bir yükseklikten sonra kendi içinde kaydırır. */
+  function autoGrow() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -152,7 +161,17 @@ export default function Home() {
     setVersions(data.versions ?? []);
     setShowProjects(false);
     setShareUrl(null);
-    setMessages([]);
+
+    // Sohbeti versiyon geçmişinden geri kur — her versiyon onu üreten isteği
+    // saklıyor. Böylece projeye dönünce ne konuştuğun kaybolmuyor.
+    const history: ChatMessage[] = [];
+    for (const v of [...(data.versions ?? [])].reverse()) {
+      if (!v.prompt) continue;
+      history.push({ role: "user", content: v.prompt });
+      history.push({ role: "assistant", content: "Uygulandı.", tone: "ok" });
+    }
+    setMessages(history);
+
     const latest = data.versions?.[0];
     if (latest?.html) {
       setHtml(latest.html);
@@ -211,6 +230,7 @@ export default function Home() {
     setCost(null);
     setStatus(text.includes("http") ? "Sayfa taranıyor…" : "Düşünüyor…");
     setInput("");
+    requestAnimationFrame(autoGrow); // gönderdikten sonra çubuk eski boyuna dönsün
     const nextMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages(nextMessages);
     setStreaming(true);
@@ -412,24 +432,31 @@ export default function Home() {
           </div>
 
           {dbReady && (
-            <div className="mt-4 flex items-center gap-2 text-[11px]">
-              <button
-                onClick={() => {
-                  setShowProjects((s) => !s);
-                  setConfirmDelete(null);
-                }}
-                className="truncate rounded-full bg-white/70 px-3 py-1 text-stone-500 transition hover:bg-white hover:text-stone-800"
-              >
-                {project ? project.title : "Yeni proje"} ▾
-              </button>
-              {project && (
+            <div className="mt-5">
+              <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-stone-400">
+                Sohbet
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setShowProjects((s) => !s);
+                    setConfirmDelete(null);
+                  }}
+                  className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-[13px] font-medium text-stone-800 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50"
+                >
+                  <span className="truncate">
+                    {project ? project.title : "Yeni sohbet"}
+                  </span>
+                  <span className="shrink-0 text-stone-400">▾</span>
+                </button>
                 <button
                   onClick={newProject}
-                  className="text-stone-400 transition hover:text-stone-700"
+                  title="Yeni sohbet başlat"
+                  className="shrink-0 rounded-xl bg-orange-400 px-3 py-2 text-[13px] font-medium text-white transition hover:bg-orange-500"
                 >
-                  + yeni
+                  + Yeni
                 </button>
-              )}
+              </div>
             </div>
           )}
 
@@ -458,8 +485,10 @@ export default function Home() {
                         setConfirmDelete(null);
                         loadProject(p.id);
                       }}
-                      className={`min-w-0 flex-1 truncate rounded-xl px-3 py-1.5 text-left text-[12px] transition hover:bg-white/70 hover:text-stone-800 ${
-                        project?.id === p.id ? "text-stone-800" : "text-stone-500"
+                      className={`min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-left text-[12.5px] transition hover:bg-orange-100 ${
+                        project?.id === p.id
+                          ? "bg-orange-400 font-medium text-white hover:bg-orange-500"
+                          : "text-stone-600 hover:text-stone-900"
                       }`}
                     >
                       {p.title}
@@ -491,14 +520,14 @@ export default function Home() {
                             setConfirmDelete(null);
                           }}
                           title="Adını değiştir"
-                          className="px-1.5 text-[11px] text-stone-300 transition hover:text-stone-600"
+                          className="rounded-lg px-2 py-1 text-[12px] text-stone-500 transition hover:bg-orange-100 hover:text-stone-900"
                         >
-                          adlandır
+                          Adlandır
                         </button>
                         <button
                           onClick={() => setConfirmDelete(p.id)}
-                          title="Projeyi sil"
-                          className="px-1.5 text-[13px] leading-none text-stone-300 transition hover:text-rose-500"
+                          title="Sohbeti sil"
+                          className="rounded-lg px-2 py-1 text-[15px] leading-none text-stone-400 transition hover:bg-rose-100 hover:text-rose-600"
                         >
                           ×
                         </button>
@@ -512,21 +541,6 @@ export default function Home() {
         </header>
 
         <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-7 pb-4">
-          {messages.length === 0 && !streaming && (
-            <div className="space-y-2.5">
-              <p className="text-xs text-stone-400">Şunları deneyebilirsin</p>
-              {EXAMPLES.map((ex) => (
-                <button
-                  key={ex}
-                  onClick={() => send(ex)}
-                  className="block w-full rounded-2xl bg-white/70 px-4 py-3 text-left text-[13px] leading-snug text-stone-500 transition hover:bg-white hover:text-stone-800"
-                >
-                  {ex}
-                </button>
-              ))}
-            </div>
-          )}
-
           {messages.map((m, i) =>
             m.role === "user" ? (
               <div
@@ -579,19 +593,39 @@ export default function Home() {
         </div>
 
         <div className="px-7 pb-7">
+          {/* Öneriler yalnızca boş bir sohbette, yazma çubuğunun hemen üstünde. */}
+          {messages.length === 0 && !streaming && (
+            <div className="mb-3 space-y-1.5">
+              <p className="text-[11px] text-stone-400">Şunları deneyebilirsin</p>
+              {EXAMPLES.map((ex) => (
+                <button
+                  key={ex}
+                  onClick={() => send(ex)}
+                  className="block w-full rounded-xl bg-white/70 px-3 py-2 text-left text-[12.5px] leading-snug text-stone-600 transition hover:bg-orange-100 hover:text-stone-900"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="rounded-3xl bg-white/80 p-2 shadow-[0_1px_3px_rgba(120,80,60,0.06)]">
             <textarea
+              ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                autoGrow();
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   send();
                 }
               }}
-              rows={3}
+              rows={2}
               placeholder="Nasıl bir sayfa olsun?"
-              className="w-full resize-none bg-transparent px-3 py-2 text-[13px] leading-relaxed text-stone-700 outline-none placeholder:text-stone-300"
+              className="w-full resize-none overflow-y-auto bg-transparent px-3 py-2 text-[13px] leading-relaxed text-stone-700 outline-none placeholder:text-stone-300"
             />
             <button
               onClick={() => send()}
@@ -639,14 +673,14 @@ export default function Home() {
             <button
               onClick={share}
               disabled={!versionId}
-              className="rounded-full px-3 py-1 text-stone-500 transition hover:bg-white/70 hover:text-stone-900 disabled:text-stone-300 disabled:hover:bg-transparent"
+              className="rounded-xl bg-white px-3.5 py-1.5 text-[12.5px] font-medium text-stone-700 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-100 hover:text-stone-900 disabled:bg-white/50 disabled:text-stone-300 disabled:hover:bg-white/50"
             >
               Paylaş
             </button>
             <button
               onClick={download}
               disabled={!html}
-              className="rounded-full px-3 py-1 text-stone-400 transition hover:bg-white/70 hover:text-stone-700 disabled:text-stone-300 disabled:hover:bg-transparent"
+              className="rounded-xl bg-white px-3.5 py-1.5 text-[12.5px] font-medium text-stone-700 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-100 hover:text-stone-900 disabled:bg-white/50 disabled:text-stone-300 disabled:hover:bg-white/50"
             >
               İndir
             </button>
@@ -661,10 +695,10 @@ export default function Home() {
                 key={v.id}
                 onClick={() => restore(v)}
                 title={v.prompt ?? ""}
-                className={`rounded-full px-2.5 py-1 transition ${
+                className={`rounded-lg px-2.5 py-1 transition ${
                   v.id === versionId
-                    ? "bg-orange-400 text-white"
-                    : "bg-white/70 text-stone-500 hover:bg-white hover:text-stone-800"
+                    ? "bg-orange-400 font-medium text-white"
+                    : "bg-white text-stone-600 hover:bg-orange-100 hover:text-stone-900"
                 }`}
               >
                 v{versions.length - i} · {clock(v.created_at)}
