@@ -24,17 +24,37 @@ export default function Giris() {
     setBusy(true);
     setError("");
 
-    const res = await fetch("/api/giris", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
-    });
+    try {
+      const res = await fetch("/api/giris", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+        credentials: "same-origin",
+      });
 
-    if (res.ok) {
+      if (!res.ok) {
+        const text = await res.text();
+        setError(`${text} (kod ${res.status})`);
+        form.reset();
+        setBusy(false);
+        return;
+      }
+
+      // Çerez gerçekten yazıldı mı kontrol et. Yazılmadıysa tarayıcı çerezi
+      // engelliyordur; yönlendirsek sonsuz döngüye gireriz.
+      const landed = await fetch("/api/projects", { credentials: "same-origin" });
+      if (landed.status === 307 || landed.redirected) {
+        setError(
+          "Şifre doğru ama tarayıcı giriş çerezini saklamadı. " +
+            "Gizli sekmedeysen normal sekmede dene, ya da bu site için çerezlere izin ver.",
+        );
+        setBusy(false);
+        return;
+      }
+
       window.location.href = "/";
-    } else {
-      setError(await res.text());
-      form.reset();
+    } catch {
+      setError("Sunucuya ulaşılamadı. Bağlantını kontrol et.");
       setBusy(false);
     }
   }
