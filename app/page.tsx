@@ -26,6 +26,34 @@ function extractHtml(raw: string): string {
   return (fenced ? fenced[1] : raw).trim();
 }
 
+/**
+ * Önizlemeye basılacak HTML'i hazırlar.
+ *
+ * Üretilen sayfadaki bağlantılara tıklanınca çerçeve o adrese gitmeye
+ * çalışıyor; adres bizim uygulamamıza ait olduğu için şifre kapısına takılıp
+ * giriş ekranı çerçevenin İÇİNDE açılıyordu. Üstelik sandbox form gönderimini
+ * engellediği için orada giriş de yapılamıyordu.
+ *
+ * Önizleme gezinmek için değil bakmak için — bağlantı ve form gönderimlerini
+ * durduruyoruz. Hover, animasyon, açılır menü gibi her şey çalışmaya devam eder.
+ */
+function previewDoc(html: string): string {
+  if (!html) return html;
+
+  const guard = `<script>
+document.addEventListener('click', function (e) {
+  var a = e.target && e.target.closest && e.target.closest('a[href]');
+  if (a) e.preventDefault();
+}, true);
+document.addEventListener('submit', function (e) { e.preventDefault(); }, true);
+</script>`;
+
+  // </head> varsa oraya, yoksa başa ekle.
+  return html.includes("</head>")
+    ? html.replace("</head>", `${guard}</head>`)
+    : guard + html;
+}
+
 function clock(iso: string): string {
   return new Date(iso).toLocaleTimeString("tr-TR", {
     hour: "2-digit",
@@ -649,7 +677,7 @@ export default function Home() {
           >
             <iframe
               title="Önizleme"
-              srcDoc={html || EMPTY_STATE}
+              srcDoc={html ? previewDoc(html) : EMPTY_STATE}
               sandbox="allow-scripts"
               className={`h-full w-full rounded-3xl bg-white shadow-[0_2px_16px_rgba(120,80,60,0.08)] transition-opacity duration-500 ${
                 streaming ? "opacity-40" : "opacity-100"
