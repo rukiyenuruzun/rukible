@@ -38,10 +38,10 @@ function extractHtml(raw: string): string {
  * Önizleme gezinmek için değil bakmak için — bağlantı ve form gönderimlerini
  * durduruyoruz. Hover, animasyon, açılır menü gibi her şey çalışmaya devam eder.
  */
-function previewDoc(html: string): string {
+function previewDoc(html: string, editMode = false): string {
   if (!html) return html;
 
-  const guard = `<script>
+  const guard = `<script data-rukible="1">
 document.addEventListener('click', function (e) {
   var a = e.target && e.target.closest && e.target.closest('a[href]');
   if (a) e.preventDefault();
@@ -49,10 +49,63 @@ document.addEventListener('click', function (e) {
 document.addEventListener('submit', function (e) { e.preventDefault(); }, true);
 </script>`;
 
+  // Metin düzenleme modu: yalnızca doğrudan metin taşıyan öğeler yazılabilir
+  // olur. Değişiklikler ana pencereye postMessage ile bildirilir; önizleme
+  // yeniden yüklenmediği için imleç kaybolmaz.
+  const editor = `<style data-rukible="1">
+  [contenteditable="true"]:hover { outline: 1px dashed rgba(251,146,60,.7); outline-offset: 3px; }
+  [contenteditable="true"]:focus { outline: 2px solid rgba(251,146,60,.9); outline-offset: 3px; }
+</style>
+<script data-rukible="1">
+(function () {
+  var SEC = 'h1,h2,h3,h4,h5,h6,p,li,td,th,dt,dd,span,a,button,figcaption,blockquote,label,strong,em';
+  function enable() {
+    document.querySelectorAll(SEC).forEach(function (el) {
+      if (el.closest('[data-rukible]')) return;
+      // Sadece yaprak öğeler: içinde başka etiket yoksa ve metni varsa.
+      if (el.children.length === 0 && el.textContent && el.textContent.trim()) {
+        el.setAttribute('contenteditable', 'true');
+        el.setAttribute('spellcheck', 'false');
+      }
+    });
+  }
+  function serialize() {
+    var clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll('[data-rukible]').forEach(function (n) { n.remove(); });
+    clone.querySelectorAll('[contenteditable]').forEach(function (n) {
+      n.removeAttribute('contenteditable');
+      n.removeAttribute('spellcheck');
+    });
+    return '<!DOCTYPE html>\\n' + clone.outerHTML;
+  }
+  var timer = null;
+  document.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      parent.postMessage({ type: 'rukible:html', html: serialize() }, '*');
+    }, 300);
+  }, true);
+  // Enter yeni paragraf açmasın, satır sonu koysun.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target && e.target.isContentEditable) {
+      e.preventDefault();
+      document.execCommand('insertLineBreak');
+    }
+  }, true);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', enable);
+  } else {
+    enable();
+  }
+})();
+</script>`;
+
+  const inject = editMode ? guard + editor : guard;
+
   // </head> varsa oraya, yoksa başa ekle.
   return html.includes("</head>")
-    ? html.replace("</head>", `${guard}</head>`)
-    : guard + html;
+    ? html.replace("</head>", `${inject}</head>`)
+    : inject + html;
 }
 
 function clock(iso: string): string {
@@ -113,6 +166,15 @@ export default function Home() {
 
   const [panelWidth, setPanelWidth] = useState(380);
   const [confirmVersion, setConfirmVersion] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  /**
+   * Elle yapılan düzenlemeler burada birikir — state'te DEĞİL.
+   * State'e yazsak önizleme her tuş vuruşunda yeniden yüklenir ve imleç kaybolur.
+   */
+  const editedRef = useRef<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -146,6 +208,18 @@ export default function Home() {
       window.removeEventListener("mouseup", onUp);
     };
   }, [panelWidth]);
+
+  // Önizlemeden gelen düzenlemeleri dinle.
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (e.data?.type !== "rukible:html") return;
+      if (typeof e.data.html !== "string") return;
+      editedRef.current = e.data.html;
+      setDirty(true);
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
 
   /** Harcama özetini tazeler — açılışta ve her üretimden sonra. */
   const refreshUsage = useCallback(() => {
@@ -407,6 +481,28 @@ export default function Home() {
     abortRef.current?.abort();
   }
 
+  /**
+   * Metin düzenleme modundan çıkar.
+   * kaydet=true ise değişiklikler yeni bir versiyon olarak saklanır.
+   */
+  async function finishEdit(kaydet: boolean) {
+    const edited = editedRef.current;
+    setEditMode(false);
+    editedRef.current = null;
+
+    if (!kaydet || !dirty || !edited) {
+      setDirty(false);
+      return;
+    }
+
+    setSaving(true);
+    setHtml(edited);
+    // Elle düzenleme modeli hiç çağırmaz — maliyeti sıfır.
+    await saveVersion(project, edited, "Elle düzenlendi", 0);
+    setDirty(false);
+    setSaving(false);
+  }
+
   /** Tek bir versiyonu siler. */
   async function removeVersion(id: string) {
     const res = await fetch(`/api/versions/${id}`, { method: "DELETE" });
@@ -455,6 +551,9 @@ export default function Home() {
 
   function restore(v: Version) {
     if (v.html) {
+      setEditMode(false);
+      setDirty(false);
+      editedRef.current = null;
       setHtml(v.html);
       setVersionId(v.id);
       setShareUrl(null);
@@ -824,6 +923,39 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-3 text-xs">
+            {editMode ? (
+              <span className="flex items-center gap-2">
+                <span className="text-[11.5px] text-orange-500">
+                  {dirty ? "Değişiklik var" : "Metne tıkla, yaz"}
+                </span>
+                <button
+                  onClick={() => finishEdit(true)}
+                  disabled={saving}
+                  className="rounded-xl bg-orange-400 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-200"
+                >
+                  {saving ? "Kaydediliyor…" : "Kaydet"}
+                </button>
+                <button
+                  onClick={() => finishEdit(false)}
+                  className="rounded-xl px-2.5 py-1.5 text-[12.5px] text-stone-500 transition hover:text-stone-900"
+                >
+                  Vazgeç
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => {
+                  setDirty(false);
+                  editedRef.current = null;
+                  setEditMode(true);
+                }}
+                disabled={!html || streaming}
+                className="rounded-xl bg-white px-3.5 py-1.5 text-[12.5px] font-medium text-stone-700 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-100 hover:text-stone-900 disabled:bg-white/50 disabled:text-stone-300 disabled:hover:bg-white/50"
+              >
+                Metni düzenle
+              </button>
+            )}
+
             {shareUrl && (
               <button
                 onClick={copyShare}
@@ -915,7 +1047,7 @@ export default function Home() {
           >
             <iframe
               title="Önizleme"
-              srcDoc={html ? previewDoc(html) : EMPTY_STATE}
+              srcDoc={html ? previewDoc(html, editMode) : EMPTY_STATE}
               sandbox="allow-scripts"
               className={`h-full w-full rounded-3xl bg-white shadow-[0_2px_16px_rgba(120,80,60,0.08)] transition-opacity duration-500 ${
                 streaming ? "opacity-40" : "opacity-100"
