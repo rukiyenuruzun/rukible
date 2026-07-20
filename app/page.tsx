@@ -101,11 +101,30 @@ export default function Home() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [usage, setUsage] = useState<{
+    kalan?: number;
+    limit?: number;
+    bugun?: number;
+    uretimSayisi?: number;
+  } | null>(null);
+  const [showUsage, setShowUsage] = useState(false);
 
   const [elapsed, setElapsed] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  /** Harcama özetini tazeler — açılışta ve her üretimden sonra. */
+  const refreshUsage = useCallback(() => {
+    fetch("/api/kullanim")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setUsage(d))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshUsage();
+  }, [refreshUsage]);
 
   /** Yazdıkça çubuğu büyütür, belli bir yükseklikten sonra kendi içinde kaydırır. */
   function autoGrow() {
@@ -328,6 +347,7 @@ export default function Home() {
     } finally {
       setStreaming(false);
       setStatus("");
+      refreshUsage();
     }
   }
 
@@ -591,6 +611,48 @@ export default function Home() {
             </p>
           )}
         </div>
+
+        {/* Harcama — her zaman görünür, tıklayınca ayrıntı açılır. */}
+        {usage?.kalan != null && (
+          <div className="px-7 pb-3">
+            <button
+              onClick={() => setShowUsage((s) => !s)}
+              className="flex w-full items-center justify-between rounded-xl bg-white/60 px-3 py-2 text-[11.5px] transition hover:bg-white"
+            >
+              <span className="text-stone-500">Kalan kredi</span>
+              <span
+                className={`font-medium tabular-nums ${
+                  usage.kalan < 1 ? "text-rose-600" : "text-stone-700"
+                }`}
+              >
+                ${usage.kalan.toFixed(2)}
+              </span>
+            </button>
+
+            {showUsage && (
+              <div className="mt-1.5 space-y-1 px-3 text-[11px] text-stone-400">
+                {usage.limit != null && (
+                  <div className="flex justify-between">
+                    <span>Toplam kredi</span>
+                    <span className="tabular-nums">${usage.limit.toFixed(2)}</span>
+                  </div>
+                )}
+                {usage.bugun != null && (
+                  <div className="flex justify-between">
+                    <span>Bugün harcanan</span>
+                    <span className="tabular-nums">${usage.bugun.toFixed(4)}</span>
+                  </div>
+                )}
+                {usage.uretimSayisi != null && (
+                  <div className="flex justify-between">
+                    <span>Toplam üretim</span>
+                    <span className="tabular-nums">{usage.uretimSayisi}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="px-7 pb-7">
           {/* Öneriler yalnızca boş bir sohbette, yazma çubuğunun hemen üstünde. */}
