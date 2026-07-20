@@ -41,10 +41,23 @@ function extractHtml(raw: string): string {
 function previewDoc(html: string, editMode = false): string {
   if (!html) return html;
 
+  // Bağlantıları üç gruba ayırıyoruz:
+  //   #bolum      -> çalışsın, önizlemede bölüme kaydırmak doğal davranış
+  //   http(s)://  -> yeni sekmede açılsın, önizleme yerinde kalsın
+  //   /urunler    -> engellensin; bu adresler bizim uygulamaya düşüyor ve
+  //                  giriş ekranı önizlemenin içinde açılıyordu
   const guard = `<script data-rukible="1">
 document.addEventListener('click', function (e) {
   var a = e.target && e.target.closest && e.target.closest('a[href]');
-  if (a) e.preventDefault();
+  if (!a) return;
+  var href = a.getAttribute('href') || '';
+  if (href.charAt(0) === '#') return;                 // sayfa içi: serbest
+  if (/^(https?:)?\\/\\//i.test(href)) {              // dış site: yeni sekme
+    e.preventDefault();
+    window.open(a.href, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  e.preventDefault();                                  // göreli yol: durdur
 }, true);
 document.addEventListener('submit', function (e) { e.preventDefault(); }, true);
 </script>`;
@@ -1048,7 +1061,7 @@ export default function Home() {
             <iframe
               title="Önizleme"
               srcDoc={html ? previewDoc(html, editMode) : EMPTY_STATE}
-              sandbox="allow-scripts"
+              sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
               className={`h-full w-full rounded-3xl bg-white shadow-[0_2px_16px_rgba(120,80,60,0.08)] transition-opacity duration-500 ${
                 streaming ? "opacity-40" : "opacity-100"
               }`}
