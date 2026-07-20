@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IP Suya Dayanıklı Kutular | Altınkaya</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { --red:#e31e24; }
+  body { font-family:'Inter Tight',system-ui,sans-serif; color:#101828; background:#fff; }
+  .mono { font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; }
+  .hairline { border-color:#e5e5e5; }
+  .btn-primary { background:var(--red); color:#fff; }
+  .btn-primary:hover { background:#c1171d; }
+  table.spec th { font-weight:600; text-align:left; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#4a5565; }
+  table.spec th, table.spec td { padding:10px 14px; border-bottom:1px solid #e5e5e5; white-space:nowrap; }
+  .chip { border:1px solid #e5e5e5; }
+  .chip:hover { border-color:#101828; }
+  a:focus-visible, button:focus-visible { outline:2px solid #e31e24; outline-offset:2px; }
+</style>
+</head>
+<body>
+
+<!-- ÜST BAR -->
+<header class="border-b hairline bg-white sticky top-0 z-20">
+  <div class="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+    <a href="#" class="font-bold text-lg tracking-tight">ALTINKAYA<span class="text-[#e31e24]">.</span></a>
+    <nav class="hidden md:flex items-center gap-6 text-sm text-[#364153]">
+      <a href="#secim" class="hover:text-black">Nasıl Seçilir</a>
+      <a href="#kategoriler" class="hover:text-black">Kategoriler</a>
+      <a href="#karsilastirma" class="hover:text-black">Karşılaştırma</a>
+      <a href="#kisitlar" class="hover:text-black">Özelleştirme Kısıtları</a>
+      <a href="#teklif" class="hover:text-black">Teklif Al</a>
+    </nav>
+    <a href="#teklif" class="btn-primary text-sm font-semibold px-4 py-2 rounded">Teknik Veri İste</a>
+  </div>
+</header>
+
+<!-- 1. HERO -->
+<section class="bg-white border-b hairline">
+  <div class="max-w-7xl mx-auto px-4 py-12 md:py-16 grid md:grid-cols-2 gap-10 items-center">
+    <div>
+      <p class="mono text-xs text-[#4a5565] mb-3">IEC 60529 · IP54 – IP68 · 176 standart gövde</p>
+      <h1 class="text-3xl md:text-4xl font-bold leading-tight tracking-tight">
+        IP Suya Dayanıklı Kutular
+      </h1>
+      <p class="mt-4 text-[#364153] leading-relaxed">
+        Saha elektroniklerinin çoğu yanlış IP sınıfı seçildiği için arızalanır — ya gereksiz
+        pahalı alüminyum alınır ya da ABS gövde dış ortamda ilk kışta conta yuvasından su alır.
+        Bu sayfa 176 standart gövde içinden ortamınıza, ölçünüze ve kablo girişinize göre
+        doğru olanı bulmanız için yapılandırıldı.
+      </p>
+      <div class="mt-6 flex flex-wrap gap-2">
+        <a href="#karsilastirma" class="chip rounded px-4 py-2 text-sm font-medium bg-white">Ölçüden başla</a>
+        <a href="#kategoriler" class="chip rounded px-4 py-2 text-sm font-medium bg-white">Uygulamadan başla</a>
+        <a href="#secim" class="chip rounded px-4 py-2 text-sm font-medium bg-white">IP sınıfından başla</a>
+      </div>
+    </div>
+    <!-- Kesit görünüm -->
+    <div class="flex justify-center" aria-hidden="true">
+      <svg viewBox="0 0 420 300" class="w-full max-w-md">
+        <rect x="60" y="80" width="300" height="160" fill="#f4f4f5" stroke="#101828" stroke-width="2"/>
+        <rect x="60" y="80" width="300" height="160" fill="none" stroke="#101828" stroke-width="2"/>
+        <!-- kapak -->
+        <rect x="48" y="60" width="324" height="28" fill="#fff" stroke="#101828" stroke-width="2"/>
+        <!-- conta -->
+        <rect x="64" y="88" width="292" height="8" fill="#e31e24" opacity="0.85"/>
+        <!-- iç vida -->
+        <rect x="80" y="120" width="10" height="100" fill="#d1d5dc" stroke="#101828"/>
+        <rect x="330" y="120" width="10" height="100" fill="#d1d5dc" stroke="#101828"/>
+        <!-- ölçü okları -->
+        <line x1="60" y1="265" x2="360" y2="265" stroke="#101828"/>
+        <line x1="60" y1="260" x2="60" y2="270" stroke="#101828"/>
+        <line x1="360" y1="260" x2="360" y2="270" stroke="#101828"/>
+        <text x="210" y="282" text-anchor="middle" font-size="12" font-family="monospace">G (genişlik) — DIN iç modül rayına göre</text>
+        <line x1="20" y1="80" x2="20" y2="240" stroke="#101828"/>
+        <line x1="15" y1="80" x2="25" y2="80" stroke="#101828"/>
+        <line x1="15" y1="240" x2="25" y2="240" stroke="#101828"/>
+        <text x="14" y="165" text-anchor="middle" font-size="12" font-family="monospace" transform="rotate(-90 14 165)">Y (derinlik)</text>
+        <!-- conta etiketi -->
+        <line x1="356" y1="92" x2="395" y2="70" stroke="#4a5565"/>
+        <text x="397" y="68" font-size="11" fill="#4a5565">EPDM/silikon conta</text>
+        <text x="397" y="82" font-size="11" fill="#4a5565">(-40 … +110 °C)</text>
+        <text x="64" y="48" font-size="11" fill="#4a5565">Vidalar gövde dışından — conta sürekliliği korunur</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- 2. SEÇİM KRİTERİ -->
+<section id="secim" class="border-b hairline bg-[#fafafa]">
+  <div class="max-w-7xl mx-auto px-4 py-12">
+    <h2 class="text-xl font-bold tracking-tight">Hangi ortam, hangi sınıf?</h2>
+    <p class="mt-2 text-sm text-[#4a5565] max-w-2xl">
+      IP sınıfı IEC 60529'a göre iki rakamdır: ilki toz, ikincisi su. Altı seçimi karar vermeden önce
+      ortam koşulunu tablodan bulun. Yanlış seçimin bedeli iki yönlüdür: düşük sınıf sahada arıza,
+      yüksek sınıf gereksiz maliyettir.
+    </p>
+    <div class="mt-6 overflow-x-auto">
+      <table class="spec w-full text-sm bg-white">
+        <thead class="bg-[#f4f4f5]">
+          <tr><th>Ortam</th><th>Asgari sınıf</th><th>Yeterli gövde tipi</th><th>Düşük seçerseniz</th><th>Aşırı seçerseniz</th></tr>
+        </thead>
+        <tbody class="text-[#364153]">
+          <tr><td>İç mekân, temiz panel dışı</td><td class="mono">IP54</td><td>ABS, conta opsiyonlu</td><td>Tozdan kontak kirlenmesi</td><td class="mono text-[#4a5565]">+%30–40 kutu maliyeti</td></tr>
+          <tr><td>Dış ortam, yağmur altı</td><td class="mono">IP65</td><td>Contalı ABS/PC</td><td>Yağmur suyu girişi, korozyon</td><td class="text-[#4a5565]">Kabul edilebilir fark</td></tr>
+          <tr><td>Basınçlı suyla yıkanan hat (gıda vb.)</td><td class="mono">IP66</td><td>Contalı PC veya alüminyum</td><td>Jet suyu contayı aşar</td><td class="text-[#4a5565]">Kabul edilebilir fark</td></tr>
+          <tr><td>Geçici su basması riski (zemin, çukur)</td><td class="mono">IP67</td><td>Contalı, vidalı kapak</td><td class="text-[#e31e24] font-medium">1 m / 30 dk batmada arıza</td><td class="text-[#4a5565]">Alüminyum IP68 gereksiz ağır</td></tr>
+          <tr><td>Sürekli su altı</td><td class="mono">IP68*</td><td>Alüminyum enjeksiyon, rakorlu</td><td>Kesin arıza</td><td class="text-[#4a5565]">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-3 text-xs text-[#4a5565]">* IP68 derinlik ve süre üretici tarafından beyan edilir; standart tek değer vermez. Talep aşamasında dalma derinliğini belirtin.</p>
+  </div>
+</section>
+
+<!-- 3. KATEGORİLER (daraltma) -->
+<section id="kategoriler" class="border-b hairline">
+  <div class="max-w-7xl mx-auto px-4 py-12">
+    <div class="flex items-end justify-between flex-wrap gap-2">
+      <div>
+        <h2 class="text-xl font-bold tracking-tight">Ürün aileleri</h2>
+        <p class="mt-2 text-sm text-[#4a5565]">176 standart gövde, 7 ailede. Aile farkı gövde tipi ve montaj şeklidir; IP sınıfı değildir.</p>
+      </div>
+      <span class="mono text-xs text-[#4a5565]">Toplam: 176 ürün</span>
+    </div>
+    <div class="mt-6 overflow-x-auto">
+      <table class="spec w-full text-sm">
+        <thead class="bg-[#f4f4f5]">
+          <tr><th>Aile</th><th>Ürün</th><th>Malzeme</th><th>Belirleyici özellik</th><th>Ne zaman tercih edilir</th></tr>
+        </thead>
+        <tbody class="text-[#364153]">
+          <tr><td class="font-medium text-[#101828]">IP67 Contalı Plastik Kutular</td><td class="mono">52</td><td class="mono">ABS / PC</td><td>Genel amaçlı, vida gövde dışından</td><td>Standart saha elektronikleri, sensör kutuları</td></tr>
+          <tr><td class="font-medium text-[#101828]">IP67 Montaj Ayaklı Contalı Kutular</td><td class="mono">30</td><td class="mono">ABS / PC</td><td>Kapak açılmadan duvara monte edilir</td><td>Direk/duvar montajı; kapak contasına dokunmadan tesisat</td></tr>
+          <tr><td class="font-medium text-[#101828]">IP67 Rakorlu Kutular</td><td class="mono">7</td><td class="mono">ABS</td><td>Fabrika çıkışlı kablo rakoru (M-serisi)</td><td>Sahada delik açmak istemediğinizde; IP devamlılığı garanti</td></tr>
+          <tr><td class="font-medium text-[#101828]">IP67 Plastik Panolar</td><td class="mono">16</td><td class="mono">ABS / PC</td><td>DIN ray, şeffaf kapak opsiyonu, kilit</td><td>Dağıtım, sigorta ve klemens panosu uygulamaları</td></tr>
+          <tr><td class="font-medium text-[#101828]">IP67 Mini Çantalar</td><td class="mono">1</td><td class="mono">PP</td><td>Taşıma saplı, sünger içli</td><td>Ölçü cihazı / saha kiti taşıma</td></tr>
+          <tr><td class="font-medium text-[#101828]">Endüstriyel Kumanda Kutuları</td><td class="mono">2</td><td class="mono">ABS</td><td>Ø22.5 buton delikleri hazır</td><td>Start/stop, acil stop istasyonları</td></tr>
+          <tr><td class="font-medium text-[#101828]">Alüminyum Enjeksiyon Kutular</td><td class="mono">68</td><td class="mono">AlSi12</td><td>EMC zırhı, yüksek darbe (IK08+), boyalı</td><td>Ağır sanayi, RF hassas elektronik, titreşimli ortam</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 4. KARŞILAŞTIRMA -->
+<section id="karsilastirma" class="border-b hairline bg-[#fafafa]">
+  <div class="max-w-7xl mx-auto px-4 py-12">
+    <h2 class="text-xl font-bold tracking-tight">Gövde boyutlarına göre karşılaştırma</h2>
+    <p class="mt-2 text-sm text-[#4a5565] max-w-2xl">
+      PCB ölçünüz + konektör payı + kablo büküm yarıçapı toplamı, iç ölçüden en az 10 mm küçük olmalı.
+      Aşağıdaki dış ölçüler (G × D × Y) seri içinden örnek seçkidir.
+    </p>
+    <div class="mt-6 overflow-x-auto">
+      <table class="spec w-full text-sm bg-white">
+        <thead class="bg-[#f4f4f5]">
+          <tr><th>Dış ölçü (mm)</th><th>Aile</th><th>Tipik kullanım</th><th>İç modül</th></tr>
+        </thead>
+        <tbody class="text-[#364153]">
+          <tr><td class="mono">50 × 45 × 30</td><td>Contalı plastik</td><td>Tek sensör / konnektör ara kutusu</td><td class="mono">—</td></tr>
+          <tr><td class="mono">52 × 50 × 35</td><td>Contalı plastik</td><td>Küçük PCB, pil yuvası</td><td class="mono">—</td></tr>
+          <tr><td class="mono">64 × 58 × 35</td><td>Contalı plastik</td><td>IoT düğüm, röle kartı</td><td class="mono">—</td></tr>
+          <tr><td class="mono">84 × 50 × 39</td><td>Contalı plastik</td><td>Dar profil, ray kenarı montaj</td><td class="mono">—</td></tr>
+          <tr><td class="mono">100 × 65 × 40</td><td>Contalı plastik</td><td>Çok kanallı sensör kartı</td><td class="mono">—</td></tr>
+          <tr><td class="mono">100 × 58 × 38.5</td><td>Contalı plastik</td><td>Haberleşme geçidi (gateway)</td><td class="mono">—</td></tr>
+          <tr><td class="mono">110.7 × 178 × 50</td><td>Montaj ayaklı</td><td>Duvara sabit kontrolör</td><td class="mono">Montaj plakası ops.</td></tr>
+          <tr><td class="mono">169 × 118.5 × 55</td><td>Plastik pano</td><td>Klemens + küçük PLC</td><td class="mono">DIN ray</td></tr>
+          <tr><td class="mono">90 × 120 × 90</td><td>Alüminyum enjeksiyon</td><td>EMC korumalı elektronik</td><td class="mono">Montaj plakası</td></tr>
+          <tr><td class="mono">100 × 150 × 85</td><td>Alüminyum enjeksiyon</td><td>Motor sürücü arayüzü</td><td class="mono">Montaj plakası</td></tr>
+          <tr><td class="mono">150 × 150 × 89</td><td>Plastik pano</td><td>Dağıtım panosu, 8–12 modül</td><td class="mono">DIN ray + plaka</td></tr>
+          <tr><td class="mono">180 × 65 × 45</td><td>Contalı plastik</td><td>Uzun hat boyu klemens kutusu</td><td class="mono">—</td></tr>
+          <tr><td class="mono">314 × 221 × 176</td><td>Plastik pano</td><td>PLC + HMI, çok sıralı klemens</td><td class="mono">2× DIN ray + plaka</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-3 text-xs text-[#4a5565]">Fiyat ve stok bilgisi kayıtlı bayi hesabında görüntülenir. Tam ölçü listesi için teknik veri isteyin.</p>
+  </div>
+</section>
+
+<!-- 5. KISITLAR -->
+<section id="kisitlar" class="border-b hairline">
+  <div class="max-w-7xl mx-auto px-4 py-12">
+    <h2 class="text-xl font-bold tracking-tight">Özelleştirme neyi bozar?</h2>
+    <p class="mt-2 text-sm text-[#4a5565] max-w-2xl">
+      Standart gövdeler IP sertifikasıyla teslim edilir. Sonradan yapılan her işlem bu beyanı etkiler:
+    </p>
+    <div class="mt-6 grid md:grid-cols-3 gap-x-10 gap-y-6 text-sm text-[#364153]">
+      <div class="border-l-2 border-[#e31e24] pl-4">
+        <p class="font-semibold text-[#101828]">CNC delik / pencere açma</p>
+        <p class="mt-1">Conta yuvasını keserse sızdırmazlık sürekliliği bozulur. Delik conta hattının içinde kalıyorsa IP sınıfı korunur; <span class="text-[#e31e24] font-medium">kesiyorsa IP yeniden değerlendirilmelidir.</span></p>
+      </div>
+      <div class="border-l-2 border-[#d1d5dc] pl-4">
+        <p class="font-semibold text-[#101828]">Kablo rakoru sonradan takma</p>
+        <p class="mt-1">Rakor diş açılan deliğin etrafında düz yüzey gerekir. Eğri veya nervürlü yüzeyde rakor contası oturmaz — rakorlu seriyi tercih edin.</p>
+      </div>
+      <div class="border-l-2 border-[#d1d5dc] pl-4">
+        <p class="font-semibold text-[#101828]">UV ve sıcaklık limiti</p>
+        <p class="mt-1">ABS dış ortamda UV ile sararır ve gevşer; kalıcı dış ortam için PC veya alüminyum seçin. Conta aralığı <span class="mono">-40 … +110 °C</span> üzerinde silikon conta isteyin.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. KONTROL LİSTESİ + 7. FORM -->
+<section id="teklif" class="bg-white border-t hairline">
+  <div class="max-w-7xl mx-auto px-4 py-12 grid md:grid-cols-2 gap-12">
+    <div>
+      <h2 class="text-xl font-bold tracking-tight">Sipariş öncesi kontrol listesi</h2>
+      <ol class="mt-5 space-y-3 text-sm text-[#364153] list-decimal list-inside">
+        <li>PCB + konektör + kablo büküm payı, iç ölçüden ≥ <span class="mono">10 mm</span> küçük mü?</li>
+        <li>Kablo giriş adedi ve kesitleri belirlendi mi? (Rakor seçimini bu belirler)</li>
+        <li>Ortam: dış ortam / basınçlı yıkama / batma riski — IP tablosuyla doğrulandı mı?</li>
+        <li>UV maruziyeti varsa ABS yerine PC/alüminyum seçildi mi?</li>
+        <li>CNC işleme conta hattını kesmiyor mu?</li>
+        <li>Montaj şekli (duvar / direk / DIN ray) aile seçimiyle uyumlu mu?</li>
+      </ol>
+    </div>
+    <div>
+      <h2 class="text-xl font-bold tracking-tight">Teknik veri ve fiyat isteyin</h2>
+      <p class="mt-2 text-sm text-[#4a5565]">Formu gönderdiğinizde uygulama mühendisi ölçü ve IP uygunluğunu doğrulayıp teknik çizim ile döner.</p>
+      <form class="mt-5 space-y-4" onsubmit="return false">
+        <div class="grid grid-cols-2 gap-4">
+          <label class="text-sm">
+            <span class="block text-[#4a5565] mb-1">Ortam</span>
+            <select class="w-full border border-[#d1d5dc] rounded px-3 py-2 bg-white">
+              <option>İç mekân</option><option>Dış ortam (yağmur)</option>
+              <option>Basınçlı yıkama</option><option>Batma riski</option>
+            </select>
+          </label>
+          <label class="text-sm">
+            <span class="block text-[#4a5565] mb-1">Hedef IP sınıfı</span>
+            <select class="w-full border border-[#d1d5dc] rounded px-3 py-2 bg-white">
+              <option>IP65</option><option selected>IP67</option><option>IP68</option><option>Emin değilim</option>
+            </select>
+          </label>
+        </div>
+        <label class="text-sm block">
+          <span class="block text-[#4a5565] mb-1">Kablo girişi (adet × kesit, ör. 2×M16)</span>
+          <input type="text" class="mono w-full border border-[#d1d5dc] rounded px-3 py-2" placeholder="2×M16, 1×M20">
+        </label>
+        <div class="grid grid-cols-2 gap-4">
+          <label class="text-sm">
+            <span class="block text-[#4a5565] mb-1">Adet</span>
+            <input type="number" min="1" class="mono w-full border border-[#d1d5dc] rounded px-3 py-2" placeholder="100">
+          </label>
+          <label class="text-sm">
+            <span class="block text-[#4a5565] mb-1">E-posta</span>
+            <input type="email" class="w-full border border-[#d1d5dc] rounded px-3 py-2" placeholder="mühendis@firma.com">
+          </label>
+        </div>
+        <button class="btn-primary font-semibold px-6 py-2.5 rounded text-sm w-full md:w-auto">Teknik veri iste</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<footer class="border-t hairline bg-[#fafafa]">
+  <div class="max-w-7xl mx-auto px-4 py-8 flex flex-wrap items-center justify-between gap-4 text-xs text-[#4a5565]">
+    <p>© Altınkaya — Endüstriyel kutu ve muhafaza çözümleri</p>
+    <p class="mono">IEC 60529 · UL 94 · RoHS uyumlu üretim</p>
+  </div>
+</footer>
+
+</body>
+</html>

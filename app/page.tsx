@@ -1,65 +1,572 @@
-import Image from "next/image";
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Logo, SLOGAN } from "./logo";
+import { applyPatches } from "@/lib/patch";
+
+type ChatMessage = { role: "user" | "assistant"; content: string };
+type Project = { id: string; title: string; updated_at: string };
+type Version = {
+  id: string;
+  prompt: string | null;
+  cost: number | null;
+  share_slug: string | null;
+  created_at: string;
+  html?: string;
+};
+
+/** Model bazen ```html ... ``` sarmalıyla döndürür; onu temizler. */
+function extractHtml(raw: string): string {
+  const fenced = raw.match(/```(?:html)?\s*([\s\S]*?)(?:```|$)/i);
+  return (fenced ? fenced[1] : raw).trim();
+}
+
+function clock(iso: string): string {
+  return new Date(iso).toLocaleTimeString("tr-TR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+const EMPTY_STATE = `<!DOCTYPE html>
+<html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body{margin:0;height:100vh;display:grid;place-items:center;background:#fff;
+       font-family:ui-sans-serif,system-ui,sans-serif;color:#c4b5ae}
+  p{font-size:13px}
+</style></head>
+<body><p>Tasarım burada görünecek</p></body></html>`;
+
+const EXAMPLES = [
+  "IP67 su geçirmez kutular için seçim rehberi sayfası",
+  "Hero'ya ölçüden ve uygulamadan başlama girişleri ekle",
+  "Ürün ailelerini karşılaştırma tablosuna çevir",
+];
 
 export default function Home() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [html, setHtml] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [mobileView, setMobileView] = useState(false);
+  const [status, setStatus] = useState("");
+  const [notes, setNotes] = useState<string[]>([]);
+  const [cost, setCost] = useState<number | null>(null);
+
+  // Kalıcılık
+  const [dbReady, setDbReady] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
+  const [versions, setVersions] = useState<Version[]>([]);
+  const [versionId, setVersionId] = useState<string | null>(null);
+  const [showProjects, setShowProjects] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const throttleRef = useRef<number>(0);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages, streaming]);
+
+  // Açılışta projeleri yükle. 503 gelirse Supabase yok demektir —
+  // araç yine çalışır, sadece kayıt tutmaz.
+  useEffect(() => {
+    fetch("/api/projects")
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then((data) => {
+        if (!data) return;
+        setDbReady(true);
+        setProjects(data.projects ?? []);
+      })
+      .catch(() => {});
+  }, []);
+
+  const loadProject = useCallback(async (id: string) => {
+    const res = await fetch(`/api/projects/${id}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    setProject(data.project);
+    setVersions(data.versions ?? []);
+    setShowProjects(false);
+    setShareUrl(null);
+    setMessages([]);
+    const latest = data.versions?.[0];
+    if (latest?.html) {
+      setHtml(latest.html);
+      setVersionId(latest.id);
+    } else {
+      setHtml("");
+      setVersionId(null);
+    }
+  }, []);
+
+  async function ensureProject(firstPrompt: string): Promise<Project | null> {
+    if (project) return project;
+    if (!dbReady) return null;
+    const res = await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: firstPrompt.slice(0, 60) }),
+    });
+    if (!res.ok) return null;
+    const { project: created } = await res.json();
+    setProject(created);
+    setProjects((prev) => [created, ...prev]);
+    return created;
+  }
+
+  async function saveVersion(
+    target: Project | null,
+    nextHtml: string,
+    prompt: string,
+    spent: number | null,
+  ) {
+    if (!target || !nextHtml) return;
+    const res = await fetch("/api/versions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: target.id,
+        html: nextHtml,
+        prompt,
+        cost: spent,
+      }),
+    });
+    if (!res.ok) return;
+    const { version } = await res.json();
+    setVersions((prev) => [{ ...version, html: nextHtml }, ...prev]);
+    setVersionId(version.id);
+    setShareUrl(null);
+  }
+
+  async function send(preset?: string) {
+    const text = (preset ?? input).trim();
+    if (!text || streaming) return;
+
+    setError(null);
+    setNotes([]);
+    setCost(null);
+    setStatus(text.includes("http") ? "Sayfa taranıyor…" : "Düşünüyor…");
+    setInput("");
+    const nextMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
+    setMessages(nextMessages);
+    setStreaming(true);
+
+    const target = await ensureProject(text);
+
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: nextMessages, currentHtml: html || undefined }),
+      });
+
+      if (!res.ok || !res.body) {
+        setError(await res.text());
+        setStreaming(false);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = "";
+      let mode: "create" | "edit" = "create";
+      let spent: number | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const raw of lines) {
+          if (!raw.trim()) continue;
+          let msg: {
+            c?: string;
+            r?: string;
+            n?: string;
+            m?: "create" | "edit";
+            u?: { cost?: number };
+          };
+          try {
+            msg = JSON.parse(raw);
+          } catch {
+            continue;
+          }
+
+          if (msg.m) mode = msg.m;
+          if (msg.n) setNotes((prev) => [...prev, msg.n!]);
+          if (msg.r) setStatus("Düşünüyor…");
+          if (msg.u?.cost != null) {
+            spent = msg.u.cost;
+            setCost(msg.u.cost);
+          }
+          if (msg.c) {
+            accumulated += msg.c;
+            if (mode === "edit") {
+              setStatus("Değişiklik hazırlanıyor…");
+            } else {
+              setStatus("Sayfa yazılıyor…");
+              const now = Date.now();
+              if (now - throttleRef.current > 300) {
+                throttleRef.current = now;
+                setHtml(extractHtml(accumulated));
+              }
+            }
+          }
+        }
+      }
+
+      let reply = "Hazır, sağda görebilirsin ✳︎";
+      let finalHtml = "";
+
+      if (mode === "edit") {
+        const result = applyPatches(html, accumulated);
+        finalHtml = result.html;
+        setHtml(result.html);
+        setNotes((prev) => [...prev, ...result.notes]);
+        if (result.applied === 0) {
+          reply = "Değişikliği uygulayamadım — isteği biraz daha net yazar mısın?";
+        } else if (result.failed > 0) {
+          reply = `${result.applied} değişiklik uygulandı, ${result.failed} tanesi tutmadı.`;
+        } else {
+          reply = "Değişiklik uygulandı ✳︎";
+        }
+        if (result.applied > 0) await saveVersion(target, finalHtml, text, spent);
+      } else {
+        finalHtml = extractHtml(accumulated);
+        setHtml(finalHtml);
+        await saveVersion(target, finalHtml, text, spent);
+      }
+
+      setMessages([...nextMessages, { role: "assistant", content: reply }]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Beklenmeyen bir hata oluştu.");
+    } finally {
+      setStreaming(false);
+      setStatus("");
+    }
+  }
+
+  async function share() {
+    if (!versionId) return;
+    const res = await fetch("/api/share", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ versionId }),
+    });
+    if (!res.ok) {
+      setError(await res.text());
+      return;
+    }
+    const { slug } = await res.json();
+    setShareUrl(`${window.location.origin}/p/${slug}`);
+    setCopied(false);
+  }
+
+  async function copyShare() {
+    if (!shareUrl) return;
+    await navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  function restore(v: Version) {
+    if (v.html) {
+      setHtml(v.html);
+      setVersionId(v.id);
+      setShareUrl(null);
+    }
+  }
+
+  function download() {
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "sayfa.html";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /** Projeyi ve tüm versiyonlarını siler. Geri alınamaz. */
+  async function removeProject(id: string) {
+    const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      setError(await res.text());
+      return;
+    }
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    setConfirmDelete(null);
+    if (project?.id === id) newProject();
+  }
+
+  function newProject() {
+    setProject(null);
+    setVersions([]);
+    setVersionId(null);
+    setHtml("");
+    setMessages([]);
+    setShareUrl(null);
+    setShowProjects(false);
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="flex h-screen bg-[#fff7f3] text-stone-700">
+      {/* SOL — sohbet */}
+      <section className="flex w-[380px] shrink-0 flex-col">
+        <header className="px-7 py-6">
+          <div className="flex items-center gap-2.5">
+            <Logo />
+            <div className="leading-none">
+              <div className="text-[17px] font-semibold tracking-tight text-stone-800">
+                Rukible
+              </div>
+              <div className="mt-1 text-[11px] text-orange-400">{SLOGAN}</div>
+            </div>
+          </div>
+
+          {dbReady && (
+            <div className="mt-4 flex items-center gap-2 text-[11px]">
+              <button
+                onClick={() => {
+                  setShowProjects((s) => !s);
+                  setConfirmDelete(null);
+                }}
+                className="truncate rounded-full bg-white/70 px-3 py-1 text-stone-500 transition hover:bg-white hover:text-stone-800"
+              >
+                {project ? project.title : "Yeni proje"} ▾
+              </button>
+              {project && (
+                <button
+                  onClick={newProject}
+                  className="text-stone-400 transition hover:text-stone-700"
+                >
+                  + yeni
+                </button>
+              )}
+            </div>
+          )}
+
+          {showProjects && (
+            <div className="mt-2 space-y-1">
+              {projects.length === 0 && (
+                <p className="text-[11px] text-stone-400">Henüz proje yok</p>
+              )}
+              {projects.map((p) => (
+                <div key={p.id} className="group flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      setConfirmDelete(null);
+                      loadProject(p.id);
+                    }}
+                    className="min-w-0 flex-1 truncate rounded-xl px-3 py-1.5 text-left text-[12px] text-stone-500 transition hover:bg-white/70 hover:text-stone-800"
+                  >
+                    {p.title}
+                  </button>
+
+                  {confirmDelete === p.id ? (
+                    <span className="flex shrink-0 items-center gap-1 pr-1">
+                      <button
+                        onClick={() => removeProject(p.id)}
+                        className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] text-rose-700 transition hover:bg-rose-200"
+                      >
+                        sil
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(null)}
+                        className="px-1 text-[11px] text-stone-400 transition hover:text-stone-600"
+                      >
+                        vazgeç
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDelete(p.id)}
+                      title="Projeyi sil"
+                      className="shrink-0 px-2 text-[13px] leading-none text-stone-300 opacity-0 transition group-hover:opacity-100 hover:text-rose-500"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </header>
+
+        <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-7 pb-4">
+          {messages.length === 0 && !streaming && (
+            <div className="space-y-2.5">
+              <p className="text-xs text-stone-400">Şunları deneyebilirsin</p>
+              {EXAMPLES.map((ex) => (
+                <button
+                  key={ex}
+                  onClick={() => send(ex)}
+                  className="block w-full rounded-2xl bg-white/70 px-4 py-3 text-left text-[13px] leading-snug text-stone-500 transition hover:bg-white hover:text-stone-800"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {messages.map((m, i) =>
+            m.role === "user" ? (
+              <div
+                key={i}
+                className="ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-orange-100/80 px-4 py-2.5 text-[13px] leading-relaxed text-stone-700"
+              >
+                {m.content}
+              </div>
+            ) : (
+              <p key={i} className="text-[13px] leading-relaxed text-stone-400">
+                {m.content}
+              </p>
+            ),
+          )}
+
+          {notes.map((n, i) => (
+            <p key={i} className="text-[11px] text-stone-400">
+              ✳︎ {n}
+            </p>
+          ))}
+
+          {streaming && (
+            <p className="flex items-center gap-2 text-[13px] text-stone-400">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-400" />
+              {status || "Çiziliyor…"}
+            </p>
+          )}
+
+          {!streaming && cost != null && (
+            <p className="text-[11px] text-stone-400">Bu üretim: ${cost.toFixed(4)}</p>
+          )}
+
+          {error && (
+            <p className="rounded-2xl bg-rose-100/70 px-4 py-3 text-xs leading-relaxed text-rose-700">
+              {error}
+            </p>
+          )}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+
+        <div className="px-7 pb-7">
+          <div className="rounded-3xl bg-white/80 p-2 shadow-[0_1px_3px_rgba(120,80,60,0.06)]">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              rows={3}
+              placeholder="Nasıl bir sayfa olsun?"
+              className="w-full resize-none bg-transparent px-3 py-2 text-[13px] leading-relaxed text-stone-700 outline-none placeholder:text-stone-300"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <button
+              onClick={() => send()}
+              disabled={streaming || !input.trim()}
+              className="w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
+            >
+              {streaming ? "Çiziliyor…" : "Gönder"}
+            </button>
+          </div>
         </div>
-      </main>
-    </div>
+      </section>
+
+      {/* SAĞ — önizleme */}
+      <section className="flex flex-1 flex-col pr-4">
+        <header className="flex items-center justify-between gap-4 py-6 pl-2 pr-4">
+          <div className="flex gap-1 rounded-full bg-white/70 p-1 text-xs">
+            <button
+              onClick={() => setMobileView(false)}
+              className={`rounded-full px-3 py-1 transition ${
+                !mobileView ? "bg-orange-400 text-white" : "text-stone-400 hover:text-stone-600"
+              }`}
+            >
+              Masaüstü
+            </button>
+            <button
+              onClick={() => setMobileView(true)}
+              className={`rounded-full px-3 py-1 transition ${
+                mobileView ? "bg-orange-400 text-white" : "text-stone-400 hover:text-stone-600"
+              }`}
+            >
+              Mobil
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3 text-xs">
+            {shareUrl && (
+              <button
+                onClick={copyShare}
+                title={shareUrl}
+                className="max-w-[260px] truncate rounded-full bg-white px-3 py-1 text-stone-600 transition hover:text-stone-900"
+              >
+                {copied ? "kopyalandı ✳︎" : shareUrl.replace(/^https?:\/\//, "")}
+              </button>
+            )}
+            <button
+              onClick={share}
+              disabled={!versionId}
+              className="rounded-full px-3 py-1 text-stone-500 transition hover:bg-white/70 hover:text-stone-900 disabled:text-stone-300 disabled:hover:bg-transparent"
+            >
+              Paylaş
+            </button>
+            <button
+              onClick={download}
+              disabled={!html}
+              className="rounded-full px-3 py-1 text-stone-400 transition hover:bg-white/70 hover:text-stone-700 disabled:text-stone-300 disabled:hover:bg-transparent"
+            >
+              İndir
+            </button>
+          </div>
+        </header>
+
+        {versions.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pb-3 pl-2 text-[11px]">
+            <span className="py-1 text-stone-400">Geçmiş</span>
+            {versions.map((v, i) => (
+              <button
+                key={v.id}
+                onClick={() => restore(v)}
+                title={v.prompt ?? ""}
+                className={`rounded-full px-2.5 py-1 transition ${
+                  v.id === versionId
+                    ? "bg-orange-400 text-white"
+                    : "bg-white/70 text-stone-500 hover:bg-white hover:text-stone-800"
+                }`}
+              >
+                v{versions.length - i} · {clock(v.created_at)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="flex flex-1 justify-center overflow-auto pb-6 pl-2">
+          <iframe
+            title="Önizleme"
+            srcDoc={html || EMPTY_STATE}
+            sandbox="allow-scripts"
+            className={`h-full rounded-3xl bg-white shadow-[0_2px_16px_rgba(120,80,60,0.08)] transition-all ${
+              mobileView ? "w-[390px]" : "w-full"
+            }`}
+          />
+        </div>
+      </section>
+    </main>
   );
 }
