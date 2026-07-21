@@ -72,6 +72,11 @@ teknik bir öğe kullan: ölçülendirilmiş çizim, kesit görünüm, IP sını
 ## TEKNİK
 - Mobil dahil her ekranda düzgün çalışsın, yatay kaydırma olmasın.
 - Tablolar dar ekranda kendi içinde kaydırılabilir olsun, sayfayı taşırmasın.
+- Sayfa içi bağlantılar gerçekten çalışsın: Hero'daki giriş yolları ("IP
+  sınıfından başla" gibi) ve gezinme bağlantıları <a href="#bolum-id"> olsun ve
+  işaret ettiği bölüm o id'yi taşısın (ör. <section id="ip-siniflari">). Her
+  giriş yolunun karşılığı olan bir bölüm gerçekten var olmalı. Kaydırmanın
+  yumuşak olması için <html> üzerinde scroll-behavior:smooth kullan.
 - Semantik HTML, yeterli kontrast, anlamlı alt metinleri.
 - Sadeliği koru: gereksiz uzunluk hem sayfayı zayıflatır hem maliyeti artırır.
   Bir bölüm yeni bilgi taşımıyorsa o bölümü hiç yazma.

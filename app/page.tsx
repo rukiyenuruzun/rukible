@@ -30,21 +30,42 @@ function extractHtml(raw: string): string {
 /**
  * Önizlemeye basılacak HTML'i hazırlar.
  *
- * Üretilen sayfadaki bağlantılara tıklanınca çerçeve o adrese gitmeye
- * çalışıyor; adres bizim uygulamamıza ait olduğu için şifre kapısına takılıp
- * giriş ekranı çerçevenin İÇİNDE açılıyordu. Üstelik sandbox form gönderimini
- * engellediği için orada giriş de yapılamıyordu.
+ * Önizleme srcdoc ile yüklendiği için sayfanın gerçek bir adresi yok
+ * (about:srcdoc). Bu yüzden bağlantılara tıklamayı tarayıcıya bırakırsak:
+ *  - "#bölüm" gibi sayfa içi bağlantılar üst pencerenin adresine göre
+ *    çözülür (localhost/#bölüm) ve şifre kapısına takılır,
+ *  - "/urunler" gibi bağlantılar da yine bizim uygulamaya gitmeye çalışır.
  *
- * Önizleme gezinmek için değil bakmak için — bağlantı ve form gönderimlerini
- * durduruyoruz. Hover, animasyon, açılır menü gibi her şey çalışmaya devam eder.
+ * Çözüm: sayfa içi (#) bağlantıları biz yakalayıp hedef bölümü bulup oraya
+ * kaydırıyoruz — böylece "IP sınıfından başla" gibi butonlar gerçekten iner.
+ * Diğer (dış/başka sayfa) bağlantılar ile form gönderimleri engelli kalır;
+ * önizleme gezinmek için değil bakmak için. Hover, animasyon, açılır menü
+ * gibi her şey çalışmaya devam eder.
  */
 function previewDoc(html: string, editMode = false): string {
   if (!html) return html;
 
   const guard = `<script data-rukible="1">
+var RUKIBLE_EDIT = ${editMode ? "true" : "false"};
 document.addEventListener('click', function (e) {
   var a = e.target && e.target.closest && e.target.closest('a[href]');
-  if (a) e.preventDefault();
+  if (!a) return;
+  // href özelliği değil, ham değeri: srcdoc'ta özellik mutlak adrese çözülür.
+  var href = a.getAttribute('href') || '';
+  if (href.charAt(0) === '#') {
+    e.preventDefault();
+    // Düzenleme modunda tıklamak metni değiştirmek içindir; kaydırma yapma.
+    if (RUKIBLE_EDIT) return;
+    var id = href.slice(1);
+    try { id = decodeURIComponent(id); } catch (err) {}
+    if (!id) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    var t = document.getElementById(id) ||
+            document.getElementsByName(id)[0];
+    if (t && t.scrollIntoView) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  // Dış veya başka sayfaya giden bağlantılar: önizlemede gezinme yok.
+  e.preventDefault();
 }, true);
 document.addEventListener('submit', function (e) { e.preventDefault(); }, true);
 </script>`;
