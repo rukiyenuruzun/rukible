@@ -1,25 +1,18 @@
 /**
- * Geçici logo — yuvarlak köşeli bir kutu (muhafaza) + içinde kıvılcım.
- * Kendi tasarımın hazır olunca sadece bu dosyanın içindeki SVG'yi değiştir,
- * kullanıldığı yerlere dokunman gerekmez. Aynı çizim app/icon.svg'de de var
- * (tarayıcı sekmesindeki ikon) — onu da güncellemeyi unutma.
+ * Rukible logosu — kodlayan maymun karakteri (public/rukible-logo.png).
+ * Tarayıcı sekmesindeki ikon (favicon) AYRI: app/icon.svg + app/favicon.ico
+ * (turuncu </> kutusu). Logoyu değiştirmek istersen public/rukible-logo.png'i
+ * değiştir; sekme ikonu için icon.svg + favicon.ico'yu değiştir.
  */
 export function Logo({ size = 22 }: { size?: number }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      fill="none"
-      aria-hidden="true"
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/rukible-logo.png"
+      alt="Rukible"
+      style={{ height: size, width: "auto" }}
       className="shrink-0"
-    >
-      <rect width="32" height="32" rx="10" fill="#fb923c" />
-      <path
-        d="M16 7.5c.6 5.2 3.3 7.9 8.5 8.5-5.2.6-7.9 3.3-8.5 8.5-.6-5.2-3.3-7.9-8.5-8.5 5.2-.6 7.9-3.3 8.5-8.5z"
-        fill="#fff"
-      />
-    </svg>
+    />
   );
 }
 

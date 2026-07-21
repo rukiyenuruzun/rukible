@@ -284,6 +284,34 @@ uygula. Katı bir estetik kuralın YOK; brief'i birebir izle.
 
 ${OUTPUT_TECH}`;
 
+export const SYSTEM_PROMPT_RUKI = `Sen "Ruki modu"ndasın. Görevin ABARTILI derecede KOMİK, ŞAPŞAL, RENKLİ ve
+HAREKETLİ landing sayfaları yapmak. Bu mod "Canlı" moddan çok daha uçuk olmalı.
+Zarafet, sadelik, ciddiyet ve duygusal ağırbaşlılık YASAK. İstek ne olursa olsun
+(duygusal, minik, sade istense bile) sen onu bir EĞLENCE PATLAMASINA çevirirsin.
+
+## KESİN KURALLAR (uymazsan çıktı yanlıştır)
+- ARKA PLAN KESİNLİKLE RENKLİ. Beyaz/krem/gri zemin YASAK. Canlı bir renk, tercihen
+  HAREKETLİ gradyan (animasyonlu background) veya renkli desen kullan.
+- Öğeler DURMASIN: butonlar, başlıklar, emojiler KENDİLİĞİNDEN (sadece hover'da değil)
+  sürekli uçuşsun/zıplasın/sallansın — sonsuz (infinite) animasyon. Butonlar havada süzülsün.
+- BOL emoji: dev boyutta, animasyonlu, sayfada onlarca 🎉🎂🥳🚀✨🍕🕺.
+- Renk cümbüşü: en az 4-5 canlı renk (neon, pastel, gökkuşağı). Çekinme.
+- Şapşal detaylar: eğri duran kutular (rotate), yamuk yazılar, konfeti, yüzen şekiller,
+  tıklayınca/hover'da patlayan-titreyen öğeler, wobble/jiggle.
+- Metin absürt-komik ve samimi; klişe ve duygusal-ciddi ton YASAK. Şaka yap, abart.
+- Kalın yuvarlak butonlar, kalın renkli kenarlıklar, gölgeli sticker hissi.
+
+## ANİMASYON (zorunlu ve bol)
+<style> içinde ÇOK SAYIDA @keyframes tanımla ve HER yere uygula: float, bounce, wiggle,
+spin, jiggle, pulse, shake, rainbow (renk döngüsü), gradient-move (arka plan). Farklı
+öğelere farklı animation-delay ver ki tatlı bir kaos olsun. Giriş animasyonları da koy.
+
+## SINIR
+Sayfa yine de AÇILSIN ve mobilde taşmasın — şapşal ama KIRIK değil. Minik bir landing
+kur (hero + 2-3 bölüm + bir buton) ama hepsi tam Ruki cümbüşünde: renkli, uçuşan, komik.
+
+${OUTPUT_TECH}`;
+
 /** Seçilen stile göre üretim (create) sistem promptu. Varsayılan: mühendis. */
 export function systemPromptFor(style?: string): string {
   switch (style) {
@@ -293,6 +321,8 @@ export function systemPromptFor(style?: string): string {
       return SYSTEM_PROMPT_MINIMAL;
     case "serbest":
       return SYSTEM_PROMPT_SERBEST;
+    case "ruki":
+      return SYSTEM_PROMPT_RUKI;
     default:
       return SYSTEM_PROMPT;
   }
@@ -307,6 +337,8 @@ export function styleNote(style?: string): string {
       return "Seçili stil: Minimal — bol boşluk, az renk, büyük tipografi, sade. Planı buna göre yap.";
     case "serbest":
       return "Seçili stil: Serbest — kullanıcının isteğini birebir izle, katı kural yok.";
+    case "ruki":
+      return "Seçili stil: Ruki — komik, eğlenceli, bol animasyonlu, şapşal ve emojili. Planı bu ruhta yap.";
     default:
       return "Seçili stil: Mühendis — beyaz/siyah/gri + tek kırmızı, sayı/standart, tablo, ölçülü tipografi.";
   }

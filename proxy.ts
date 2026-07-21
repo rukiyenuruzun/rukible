@@ -33,7 +33,8 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Paylaşım sayfaları, giriş ekranı ve statik dosyalar hariç her şey.
-    "/((?!p/|giris|api/giris|_next/|favicon|icon).*)",
+    // Paylaşım sayfaları, giriş ekranı ve statik dosyalar (logo/ikon dahil)
+    // hariç her şey. Logo giriş ekranında da görünmeli, o yüzden şifresiz.
+    "/((?!p/|giris|api/giris|_next/|favicon|icon|rukible-logo).*)",
   ],
 };

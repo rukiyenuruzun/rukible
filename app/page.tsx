@@ -1117,8 +1117,8 @@ export default function Home() {
         className="flex shrink-0 flex-col overflow-hidden"
       >
         <header className="px-7 py-6">
-          <div className="flex items-center gap-3">
-            <Logo size={30} />
+          <div className="flex items-center gap-4">
+            <Logo size={46} />
             <div className="leading-none">
               <div className="text-[23px] font-semibold tracking-tight text-stone-800">
                 Rukible
@@ -1416,6 +1416,7 @@ export default function Home() {
                 <option value="canli">Canlı</option>
                 <option value="minimal">Minimal</option>
                 <option value="serbest">Serbest</option>
+                <option value="ruki">Ruki 🐵</option>
               </select>
               <button
                 onClick={() => fileRef.current?.click()}
