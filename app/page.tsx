@@ -725,10 +725,6 @@ export default function Home() {
         let finalHtml = "";
 
         if (serverMode === "edit") {
-          const result = applyPatches(html, accumulated);
-          finalHtml = result.html;
-          setHtml(result.html);
-
           // Model "bunu yapamam" dediyse (ör. sayfada artık olmayan bir bölümü
           // geri getirmek): açıklamasını olduğu gibi gösteriyoruz.
           let cantDoText = "";
@@ -740,63 +736,108 @@ export default function Home() {
             cantDoText = cantDoText.trim();
           }
 
-          // Modelin en sona koyduğu "---ÖZET---" listesi: ne değiştirdiğini söyler.
-          const summary = accumulated.match(/---ÖZET---\s*([\s\S]*)$/);
-          const changes = summary
-            ? summary[1]
-                .split("\n")
-                .map((l) => l.replace(/^\s*[-•*]\s*/, "").trim())
-                .filter(Boolean)
-            : [];
+          // Uygulanan bir yamadan kullanıcı mesajı üretir (modelin ÖZET'inden).
+          const reportFor = (
+            content: string,
+            r: ReturnType<typeof applyPatches>,
+          ): { reply: string; tone: "ok" | "warn" } => {
+            const summary = content.match(/---ÖZET---\s*([\s\S]*)$/);
+            const chg = summary
+              ? summary[1]
+                  .split("\n")
+                  .map((l) => l.replace(/^\s*[-•*]\s*/, "").trim())
+                  .filter(Boolean)
+              : [];
+            let rep = chg.length
+              ? chg.map((c) => `• ${c}`).join("\n")
+              : `${r.applied} değişiklik uyguladım.`;
+            let tn: "ok" | "warn" = "ok";
+            if (r.failed > 0) {
+              rep +=
+                `\n⚠ ${r.failed} değişiklik sayfaya tutmadı. ` +
+                "İstediğin tam olmadıysa sağdaki sürüm geçmişinden geri alabilirsin.";
+              tn = "warn";
+            }
+            return { reply: rep, tone: tn };
+          };
 
-          if (result.applied === 0) {
-            if (cantDoText) {
-              reply = cantDoText;
-              tone = "warn";
+          let result = applyPatches(html, accumulated);
+          let content = accumulated;
+
+          // Yama tutmadı ve "yapamam" demedi → HIZLI bir kez daha dene ("birebir
+          // kopyala" uyarısıyla). Çıktısı küçük olduğu için sayfa büyük olsa da
+          // hızlıdır; çoğu eşleşme hatasını burada yakalayıp yavaş yeniden yazımdan
+          // kurtuluruz.
+          if (result.applied === 0 && !cantDoText) {
+            setStatus("Tekrar deniyorum…");
+            const hint =
+              text +
+              "\n\n(Not: değiştireceğin metni sayfadan HARFİ HARFİNE, boşluk ve girintileriyle kopyala.)";
+            const retry = await streamOnce(
+              [{ role: "user", content: hint }],
+              html,
+              controller.signal,
+              undefined,
+              img,
+            );
+            if (retry.cost != null) {
+              spent = (spent ?? 0) + retry.cost;
+              setCost(spent);
+            }
+            const r2 = applyPatches(html, retry.content);
+            if (r2.mode === "patch" && r2.applied > 0) {
+              result = r2;
+              content = retry.content;
+            }
+          }
+
+          if (result.applied > 0) {
+            finalHtml = result.html;
+            setHtml(result.html);
+            setNotes((prev) => [...prev, ...result.notes]);
+            const rep = reportFor(content, result);
+            reply = rep.reply;
+            tone = rep.tone;
+            await saveVersion(target, finalHtml, text, spent);
+          } else if (cantDoText) {
+            reply = cantDoText;
+            tone = "warn";
+          } else if (html.length <= 16000) {
+            // Sayfa küçük: tam yeniden yazımla güvenilir uygula (hızlı).
+            setStatus("Yama tutmadı, sayfayı yeniden yazarak uyguluyorum…");
+            const rewrite = await streamOnce(
+              [{ role: "user", content: text }],
+              html,
+              controller.signal,
+              "fulledit",
+              img,
+            );
+            if (rewrite.cost != null) {
+              spent = (spent ?? 0) + rewrite.cost;
+              setCost(spent);
+            }
+            const newHtml = extractHtml(rewrite.content);
+            if (
+              /<(!doctype|html)[\s>]/i.test(newHtml) &&
+              newHtml.length > html.length * 0.5
+            ) {
+              finalHtml = newHtml;
+              setHtml(newHtml);
+              reply = "Hızlı yama tutmadı; sayfayı yeniden yazarak uyguladım.";
+              tone = "ok";
+              await saveVersion(target, newHtml, text, spent);
             } else {
-              // Yama tutmadı (model metni birebir kopyalayamadı). Pes etmek yerine
-              // sayfayı tam yeniden yazarak uygula — pahalı ama güvenilir yedek.
-              setStatus("Yama tutmadı, sayfayı yeniden yazarak uyguluyorum…");
-              const rewrite = await streamOnce(
-                [{ role: "user", content: text }],
-                html,
-                controller.signal,
-                "fulledit",
-                img,
-              );
-              if (rewrite.cost != null) {
-                spent = (spent ?? 0) + rewrite.cost;
-                setCost(spent);
-              }
-              const newHtml = extractHtml(rewrite.content);
-              const looksValid =
-                /<(!doctype|html)[\s>]/i.test(newHtml) && newHtml.length > html.length * 0.5;
-              if (looksValid) {
-                finalHtml = newHtml;
-                setHtml(newHtml);
-                reply = "Hızlı yama tutmadı; sayfayı yeniden yazarak uyguladım.";
-                tone = "ok";
-                await saveVersion(target, newHtml, text, spent);
-              } else {
-                reply =
-                  "Değişikliği uygulayamadım — isteği biraz daha net yazar mısın? " +
-                  "(Birden fazla şey istiyorsan numaralandırarak yaz, daha yeniyim.)";
-                tone = "warn";
-              }
+              reply =
+                "Değişikliği uygulayamadım — isteği biraz daha net yazar mısın?";
+              tone = "warn";
             }
           } else {
-            setNotes((prev) => [...prev, ...result.notes]);
-            // Dürüst rapor: gerçek uygulanan sayıyı esas al, modelin dediğini göster.
-            reply = changes.length
-              ? changes.map((c) => `• ${c}`).join("\n")
-              : `${result.applied} değişiklik uyguladım.`;
-            if (result.failed > 0) {
-              reply +=
-                `\n⚠ ${result.failed} değişiklik sayfaya tutmadı. ` +
-                "İstediğin tam olmadıysa sağdaki sürüm geçmişinden geri alabilirsin.";
-              tone = "warn";
-            }
-            await saveVersion(target, finalHtml, text, spent);
+            // Sayfa büyük: tam yeniden yazım dakikalarca sürer. Yapmıyoruz; daha
+            // belirgin bir istek yamanın tutmasını sağlar.
+            reply =
+              "Bunu hızlı uygulayamadım ve sayfa büyük olduğu için tam yeniden yazım çok uzun sürerdi. " +
+              "İsteği biraz daha belirgin yazar mısın — hangi öğe (ör. karşılaştırma tablosu) ve tam olarak ne değişsin?";
+            tone = "warn";
           }
         } else {
           finalHtml = extractHtml(accumulated);

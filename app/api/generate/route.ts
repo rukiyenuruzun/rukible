@@ -178,11 +178,11 @@ export async function POST(req: Request) {
 
   // Belirsiz/çok parçalı isteklerde model daha çok düşünsün; net isteklerde
   // taban seviyede kalıp ucuz çalışsın. (bkz. lib/intent.ts)
-  // Plan ve tam yeniden yazım daha ağır işler; düşük seviyede model tembelleşip
-  // değişikliği hiç yapmayabiliyor — bu ikisinde taban en az "medium".
+  // Plan bir düşünme işi olduğu için en az "medium". Tam yeniden yazım ise (güçlü
+  // promptla) low'da da doğru çalışıyor ve medium'un fazla "düşünme"si büyük
+  // sayfalarda dakikalar sürdürüyordu — o yüzden fulledit taban seviyede kalır.
   const baseEffort = chooseEffort(lastUserMessage?.content ?? "");
-  const effort =
-    (isPlan || isFullEdit) && baseEffort === "low" ? REASONING_EFFORT_HARD : baseEffort;
+  const effort = isPlan && baseEffort === "low" ? REASONING_EFFORT_HARD : baseEffort;
 
   const maxTokens = isPlan
     ? MAX_PLAN_TOKENS
