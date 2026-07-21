@@ -8,10 +8,11 @@ import {
   REASONING_EFFORT_HARD,
 } from "@/lib/config";
 import {
-  SYSTEM_PROMPT,
   EDIT_SYSTEM_PROMPT,
   PLAN_SYSTEM_PROMPT,
   FULL_EDIT_SYSTEM_PROMPT,
+  systemPromptFor,
+  styleNote,
 } from "@/lib/prompt";
 import { chooseEffort } from "@/lib/intent";
 import { extractUrls, fetchPageProfile, profileToPrompt } from "@/lib/fetchPage";
@@ -45,14 +46,20 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { messages?: ChatMessage[]; currentHtml?: string; mode?: string };
+  let body: {
+    messages?: ChatMessage[];
+    currentHtml?: string;
+    mode?: string;
+    image?: string;
+    style?: string;
+  };
   try {
     body = await req.json();
   } catch {
     return new Response("Geçersiz istek gövdesi.", { status: 400 });
   }
 
-  const { messages = [], currentHtml, mode } = body;
+  const { messages = [], currentHtml, mode, image, style } = body;
   if (messages.length === 0) {
     return new Response("Mesaj bulunamadı.", { status: 400 });
   }
@@ -68,15 +75,19 @@ export async function POST(req: Request) {
   // sadece değişecek blokları döndürür. Maliyetin büyük kısmı burada düşüyor.
   const isEdit = !isPlan && !isFullEdit && Boolean(currentHtml);
 
+  // Üretim (create) seçili stile göre; plan da stili bilsin. Düzenleme stilden
+  // bağımsız — mevcut sayfanın kendi diline uyar.
   const systemPrompt = isPlan
-    ? PLAN_SYSTEM_PROMPT
+    ? `${PLAN_SYSTEM_PROMPT}\n\n${styleNote(style)}`
     : isFullEdit
       ? FULL_EDIT_SYSTEM_PROMPT
       : isEdit
         ? EDIT_SYSTEM_PROMPT
-        : SYSTEM_PROMPT;
+        : systemPromptFor(style);
 
-  const conversation: { role: "system" | "user" | "assistant"; content: string }[] = [
+  // content genelde metin (string); görsel eklendiğinde son kullanıcı mesajı
+  // çok-kymodlu bir diziye ({text}, {image_url}) dönüşür.
+  const conversation: { role: "system" | "user" | "assistant"; content: unknown }[] = [
     { role: "system", content: systemPrompt },
   ];
 
@@ -142,6 +153,28 @@ export async function POST(req: Request) {
   }
 
   conversation.push(...messages);
+
+  // Görsel eklendiyse (ekran görüntüsü vb.) son kullanıcı mesajına iliştir ki
+  // model NE gösterdiğini görsün. ~8 MB üstünü reddet (kaza/kötüye kullanım freni).
+  if (
+    typeof image === "string" &&
+    image.startsWith("data:image/") &&
+    image.length < 8_000_000
+  ) {
+    for (let i = conversation.length - 1; i >= 0; i--) {
+      if (conversation[i].role === "user") {
+        const txt = typeof conversation[i].content === "string" ? (conversation[i].content as string) : "";
+        conversation[i] = {
+          role: "user",
+          content: [
+            { type: "text", text: txt || "Bu görseldeki duruma göre yardımcı ol." },
+            { type: "image_url", image_url: { url: image } },
+          ],
+        };
+        break;
+      }
+    }
+  }
 
   // Belirsiz/çok parçalı isteklerde model daha çok düşünsün; net isteklerde
   // taban seviyede kalıp ucuz çalışsın. (bkz. lib/intent.ts)

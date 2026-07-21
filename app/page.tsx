@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Logo, SLOGAN } from "./logo";
 import { applyPatches } from "@/lib/patch";
 import { SITE_URL } from "@/lib/config";
@@ -12,6 +12,8 @@ type ChatMessage = {
   tone?: "ok" | "warn";
   /** true ise bu asistan mesajı bir plandır; altında "Uygula" düğmesi çıkar. */
   plan?: boolean;
+  /** true ise kullanıcı bu mesaja bir görsel iliştirdi (sohbette işaret gösterilir). */
+  hasImage?: boolean;
 };
 type Project = { id: string; title: string; updated_at: string };
 type Version = {
@@ -68,6 +70,39 @@ function saveChatSnapshot(
   } catch {
     // depolama kotası dolabilir; sessiz geç
   }
+}
+
+/**
+ * Bir görsel dosyasını küçültüp data URL'e çevirir. Ekran görüntüleri büyük
+ * olabiliyor; uzun kenarı en fazla 1600px'e indirip JPEG %85 ile kodluyoruz —
+ * hem maliyet hem de model sınırları için makul boyut.
+ */
+function fileToDataUrl(file: File, maxDim = 1600, quality = 0.85): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (Math.max(width, height) > maxDim) {
+        const scale = maxDim / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("canvas yok"));
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("görsel okunamadı"));
+    };
+    img.src = url;
+  });
 }
 
 /** Model bazen ```html ... ``` sarmalıyla döndürür; onu temizler. */
@@ -256,6 +291,10 @@ export default function Home() {
   const [mode, setMode] = useState<"build" | "plan">("build");
   // Plan modunda akan metni canlı göstermek için (bitince mesaja dönüşür).
   const [planDraft, setPlanDraft] = useState("");
+  // Sıradaki mesaja iliştirilecek görsel (ekran görüntüsü vb.) — data URL.
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  // Üretim stili (yeni sayfalar için). Düzenleme mevcut sayfanın diline uyar.
+  const [style, setStyle] = useState("muhendis");
 
   // Kalıcılık
   const [dbReady, setDbReady] = useState(false);
@@ -295,6 +334,23 @@ export default function Home() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const draggingRef = useRef(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  /** Görsel seçildiğinde: küçült, data URL'e çevir, sıradaki mesaja iliştir. */
+  async function handleFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // aynı dosyayı tekrar seçebilmek için sıfırla
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Sadece görsel (resim) eklenebilir.");
+      return;
+    }
+    try {
+      setPendingImage(await fileToDataUrl(file));
+    } catch {
+      setError("Görsel işlenemedi.");
+    }
+  }
 
   /**
    * Açılışta sohbet yedekten geri kurulana kadar kaydetmeyi bekletir; aksi
@@ -309,10 +365,12 @@ export default function Home() {
     saveChatSnapshot(project?.id ?? null, { messages, html });
   }, [messages, html, project?.id]);
 
-  // Panel genişliğini hatırla.
+  // Panel genişliğini ve seçili stili hatırla.
   useEffect(() => {
     const saved = Number(localStorage.getItem("rukible_panel"));
     if (saved >= 300 && saved <= 720) setPanelWidth(saved);
+    const savedStyle = localStorage.getItem("rukible_style");
+    if (savedStyle) setStyle(savedStyle);
   }, []);
 
   // Ayırıcıyı sürükleme.
@@ -500,7 +558,9 @@ export default function Home() {
 
   async function send(preset?: string, asBuild?: boolean) {
     const text = (preset ?? input).trim();
-    if (!text || streaming) return;
+    // Görsel varsa metin olmadan da gönderilebilir.
+    const img = pendingImage;
+    if ((!text && !img) || streaming) return;
 
     // "Uygula" düğmesi asBuild=true geçer: seçili mod ne olursa olsun Build çalışır.
     const activeMode: "build" | "plan" = asBuild ? "build" : mode;
@@ -508,6 +568,7 @@ export default function Home() {
     setError(null);
     setNotes([]);
     setCost(null);
+    setPendingImage(null); // iliştirildi; kutuyu boşalt
     setStatus(
       activeMode === "plan"
         ? "Planlanıyor…"
@@ -517,12 +578,18 @@ export default function Home() {
     );
     setInput("");
     requestAnimationFrame(autoGrow); // gönderdikten sonra çubuk eski boyuna dönsün
-    const nextMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
+    // API'ye gerçek metni gönder; ekranda görselli boş mesajı "📷 Görsel" göster.
+    const apiMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
+    const nextMessages: ChatMessage[] = [
+      ...messages,
+      { role: "user", content: text || "📷 Görsel", hasImage: !!img },
+    ];
     setMessages(nextMessages);
 
     // Çoklu adım (numaralı istek) + ortada sayfa varsa: tek seferde değil, her
     // adımı ayrı küçük bir düzenleme olarak SIRAYLA uygula ve tek tek raporla.
-    if (activeMode === "build" && html) {
+    // Görsel eklendiyse bölme — görsel bağlamı isteğin tamamına uygulanmalı.
+    if (activeMode === "build" && html && !img) {
       const steps = parseSteps(text);
       if (steps.length >= 2) {
         await applyStepwise(steps, text, nextMessages);
@@ -533,7 +600,7 @@ export default function Home() {
     setStreaming(true);
 
     // Plan modu sürüm üretmez; boş proje açmamak için yalnızca mevcut projeyi kullan.
-    const target = activeMode === "plan" ? project : await ensureProject(text);
+    const target = activeMode === "plan" ? project : await ensureProject(text || "görsel");
 
     try {
       const controller = new AbortController();
@@ -543,9 +610,11 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: nextMessages,
+          messages: apiMessages,
           currentHtml: html || undefined,
           mode: activeMode === "plan" ? "plan" : undefined,
+          image: img || undefined,
+          style,
         }),
         signal: controller.signal,
       });
@@ -662,6 +731,7 @@ export default function Home() {
                 html,
                 controller.signal,
                 "fulledit",
+                img,
               );
               if (rewrite.cost != null) {
                 spent = (spent ?? 0) + rewrite.cost;
@@ -746,6 +816,7 @@ export default function Home() {
     baseHtml: string,
     signal: AbortSignal,
     reqMode?: "fulledit",
+    image?: string | null,
   ): Promise<{ content: string; cost: number | null }> {
     const res = await fetch("/api/generate", {
       method: "POST",
@@ -754,6 +825,7 @@ export default function Home() {
         messages: msgs,
         currentHtml: baseHtml || undefined,
         mode: reqMode,
+        image: image || undefined,
       }),
       signal,
     });
@@ -1171,6 +1243,7 @@ export default function Home() {
                 key={i}
                 className="ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-orange-100/80 px-4 py-2.5 text-[13px] leading-relaxed text-stone-700"
               >
+                {m.hasImage && <span className="mr-1" aria-hidden="true">📷</span>}
                 {m.content}
               </div>
             ) : m.plan ? (
@@ -1306,8 +1379,8 @@ export default function Home() {
           )}
 
           <div className="rounded-3xl bg-white/80 p-2 shadow-[0_1px_3px_rgba(120,80,60,0.06)]">
-            {/* Build / Plan geçişi */}
-            <div className="mb-1 flex gap-1 px-1">
+            {/* Build / Plan geçişi + görsel ekle */}
+            <div className="mb-1 flex items-center gap-1 px-1">
               <button
                 onClick={() => setMode("build")}
                 title="Sayfayı değiştirir"
@@ -1330,7 +1403,55 @@ export default function Home() {
               >
                 Plan
               </button>
+              <select
+                value={style}
+                onChange={(e) => {
+                  setStyle(e.target.value);
+                  localStorage.setItem("rukible_style", e.target.value);
+                }}
+                title="Üretim stili — yeni sayfalar bu stille üretilir"
+                className="rounded-full bg-white px-2 py-1 text-[11px] text-stone-600 outline-none ring-1 ring-stone-200"
+              >
+                <option value="muhendis">Mühendis</option>
+                <option value="canli">Canlı</option>
+                <option value="minimal">Minimal</option>
+                <option value="serbest">Serbest</option>
+              </select>
+              <button
+                onClick={() => fileRef.current?.click()}
+                title="Görsel ekle (ekran görüntüsü) — model görüp anlar"
+                className="ml-auto rounded-full px-2.5 py-1 text-[13px] text-stone-400 transition hover:bg-orange-100 hover:text-stone-700"
+              >
+                📎
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFile}
+                className="hidden"
+              />
             </div>
+
+            {/* İliştirilen görsel önizlemesi */}
+            {pendingImage && (
+              <div className="mb-1 flex items-center gap-2 px-1">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={pendingImage}
+                  alt="eklenen görsel"
+                  className="h-12 w-12 rounded-lg object-cover ring-1 ring-orange-200"
+                />
+                <span className="text-[11.5px] text-stone-500">Görsel eklendi</span>
+                <button
+                  onClick={() => setPendingImage(null)}
+                  title="Görseli kaldır"
+                  className="rounded-full px-1.5 text-[13px] text-stone-400 transition hover:text-rose-600"
+                >
+                  ×
+                </button>
+              </div>
+            )}
             <textarea
               ref={inputRef}
               value={input}

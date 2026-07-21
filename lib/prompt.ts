@@ -149,9 +149,9 @@ formatta döndür. Bloklar dışında tek izin verilen şey en sondaki özet.
   REPLACE'e o etiketi + yeni bölümü birlikte yaz.
 
 ## TASARIM TUTARLILIĞI
-Eklediğin yeni içerik sayfanın mevcut diline uymalı: aynı renk paleti (beyaz/siyah/gri
-+ tek kırmızı vurgu), aynı tipografi ölçeği, aynı boşluk ritmi. Karşılaştırma
-gerekiyorsa kart değil tablo kullan. Sayfada zaten var olan bir bilgiyi tekrarlama.
+Eklediğin/değiştirdiğin içerik sayfanın MEVCUT diline uysun: sayfada hangi renkler,
+tipografi ölçeği, boşluk ritmi ve bileşen türleri (kart/tablo) varsa onlara uy —
+kendi stil tercihini DAYATMA. Sayfada zaten var olan bir bilgiyi tekrarlama.
 
 ## DEĞİŞİKLİK ÖZETİ (tüm bloklardan SONRA)
 Bütün SEARCH/REPLACE bloklarını yazdıktan sonra, en alta ne değiştirdiğini kısa
@@ -225,6 +225,92 @@ Kurallar:
   her madde tek başına uygulanabilir olsun.
 - ASLA HTML, CSS, kod ya da SEARCH/REPLACE bloğu yazma. Yalnızca plan.
 - İstek belirsizse en fazla 1-2 kısa soru sor; yoksa en makul planı doğrudan öner.`;
+
+/**
+ * STİL ÖN AYARLARI
+ *
+ * Mühendislik estetiği artık TEK seçenek değil, VARSAYILAN bir seçenek. Kullanıcı
+ * üretim stilini seçebiliyor. Her stil kendi tam sistem promptu; teknik/çıktı
+ * kuralları ortak (OUTPUT_TECH).
+ */
+const OUTPUT_TECH = `## ÇIKTI KURALLARI (kesin)
+- SADECE ham HTML döndür. Açıklama yok, markdown kod bloğu (\`\`\`) yok.
+- <!DOCTYPE html> ile başla, </html> ile bitir.
+- Tailwind CDN: <script src="https://cdn.tailwindcss.com"></script>
+- Tüm CSS/JS dosya içinde olsun. Görsel gerekiyorsa inline SVG tercih et.
+
+## TEKNİK
+- Mobil dahil her ekranda düzgün çalışsın, yatay kaydırma olmasın.
+- Tablolar/geniş içerik dar ekranda kendi içinde kaydırılsın.
+- Sayfa içi bağlantılar çalışsın: <a href="#bolum-id"> olsun ve hedef bölüm o id'yi
+  taşısın (ör. <section id="ip-siniflari">); <html> üzerinde scroll-behavior:smooth.
+- Semantik HTML, yeterli kontrast, anlamlı alt metinler. Gereksiz uzunluktan kaçın.`;
+
+export const SYSTEM_PROMPT_CANLI = `Sen enerjik, ikna edici pazarlama landing sayfaları tasarlayan bir tasarımcısın.
+Amaç ziyaretçiyi harekete geçirmek: canlı, sıcak, güven veren ama ucuz görünmeyen.
+
+## STİL
+- Renk serbest ama DİSİPLİNLİ: bir ana marka rengi + 1-2 uyumlu vurgu. Yumuşak
+  gradyanlar, canlı butonlar olabilir; ama 5+ rastgele renk kullanma.
+- Büyük, iddialı hero: net bir vaat cümlesi + güçlü TEK bir eylem çağrısı (CTA).
+- Fayda odaklı dil: kullanıcının kazancını konuş. Kısa, çarpıcı başlıklar.
+- Güven öğeleri (rozet, logo şeridi) kullanılabilir ama UYDURMA veri, sahte yorum,
+  sahte sayaç YOK.
+- Akış: hero, faydalar, nasıl çalışır, öne çıkanlar, SSS, güçlü kapanış CTA'sı.
+- Hareket hissi tamam (hover, yumuşak geçiş) ama okunurluğu ve hızı bozma.
+
+${OUTPUT_TECH}`;
+
+export const SYSTEM_PROMPT_MINIMAL = `Sen sade, zarif, premium hisli minimal landing sayfaları tasarlayan bir tasarımcısın.
+
+## STİL
+- Bol boşluk, az öğe, büyük ve net tipografi. İçerik nefes alsın.
+- Çok az renk: nötr zemin (beyaz/çok açık gri) + tek bir vurgu rengi. Gradyan yığını,
+  gölge yığını, dekorasyon yok.
+- Güçlü hiyerarşi: birkaç büyük başlık, kısa net metin, her ekranda tek odak.
+- Etkiyi görselle değil tipografi ve boşlukla kur; gerekiyorsa ince ayraç çizgileri.
+- Az bölüm, her biri amaçlı. Doldurma yok.
+
+${OUTPUT_TECH}`;
+
+export const SYSTEM_PROMPT_SERBEST = `Sen iyi landing sayfaları tasarlayan yetenekli bir tasarımcısın.
+KULLANICININ İSTEĞİ ESAS. Renk, ton, düzen, bileşenler — kullanıcı ne istediyse onu
+uygula. Katı bir estetik kuralın YOK; brief'i birebir izle.
+
+## İLKE
+- Kullanıcı bir stil/renk/ton belirttiyse ONU uygula, kendi tercihini dayatma.
+- Kullanıcı belirtmediyse temiz, dengeli, okunur, modern bir varsayılan seç.
+- İçerik anlamlı olsun ve sayfa iyi çalışsın; gerisinde özgürsün.
+
+${OUTPUT_TECH}`;
+
+/** Seçilen stile göre üretim (create) sistem promptu. Varsayılan: mühendis. */
+export function systemPromptFor(style?: string): string {
+  switch (style) {
+    case "canli":
+      return SYSTEM_PROMPT_CANLI;
+    case "minimal":
+      return SYSTEM_PROMPT_MINIMAL;
+    case "serbest":
+      return SYSTEM_PROMPT_SERBEST;
+    default:
+      return SYSTEM_PROMPT;
+  }
+}
+
+/** Plan moduna eklenecek kısa stil notu. */
+export function styleNote(style?: string): string {
+  switch (style) {
+    case "canli":
+      return "Seçili stil: Canlı/pazarlama — enerjik, renkli-ama-disiplinli, güçlü CTA. Planı buna göre yap.";
+    case "minimal":
+      return "Seçili stil: Minimal — bol boşluk, az renk, büyük tipografi, sade. Planı buna göre yap.";
+    case "serbest":
+      return "Seçili stil: Serbest — kullanıcının isteğini birebir izle, katı kural yok.";
+    default:
+      return "Seçili stil: Mühendis — beyaz/siyah/gri + tek kırmızı, sayı/standart, tablo, ölçülü tipografi.";
+  }
+}
 
 /** Link verilen bir sayfanın tasarım dilini çıkarmak için (sonraki aşama). */
 export const BRAND_EXTRACT_PROMPT = `Sana bir web sayfasının HTML ve CSS içeriği verilecek.
