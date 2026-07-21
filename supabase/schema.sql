@@ -7,9 +7,13 @@
 create table if not exists projects (
   id          uuid primary key default gen_random_uuid(),
   title       text not null default 'Adsız proje',
+  chat        jsonb,                -- sohbet geçmişi (checklist'ler dahil), her cihazda aynı
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
+
+-- Daha önce kurduysan bu satır 'chat' sütununu ekler (varsa dokunmaz):
+alter table projects add column if not exists chat jsonb;
 
 -- Her üretim ve her düzenleme ayrı bir versiyon olarak saklanır.
 -- Geri alma böyle çalışır: eski versiyonu seçmen yeterli, hiçbir şey silinmez.

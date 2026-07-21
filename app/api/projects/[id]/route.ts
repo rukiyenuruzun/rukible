@@ -15,9 +15,11 @@ export async function GET(
 
   const { id } = await params;
 
+  // "*" ile alıyoruz: 'chat' sütunu (migration çalıştıysa) gelir, çalışmadıysa
+  // hata vermeden gelmez. Böylece kod her iki durumda da bozulmadan çalışır.
   const { data: project, error: projectError } = await db
     .from("projects")
-    .select("id, title, created_at, updated_at")
+    .select("*")
     .eq("id", id)
     .single();
 
@@ -54,7 +56,7 @@ export async function DELETE(
   return Response.json({ ok: true });
 }
 
-/** Proje başlığını değiştirir. */
+/** Proje başlığını değiştirir VEYA sohbeti kaydeder ({chat: [...]}). */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -64,6 +66,15 @@ export async function POST(
 
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
+
+  // Sohbet kaydı: checklist'ler dahil tüm mesajlar DB'de saklanır ki her cihaz/
+  // sitede (localhost, Vercel) aynı zengin sohbet görünsün.
+  if (Array.isArray(body?.chat)) {
+    const { error } = await db.from("projects").update({ chat: body.chat }).eq("id", id);
+    // 'chat' sütunu yoksa (migration çalışmadıysa) sessizce geç — localStorage yedeği var.
+    return Response.json({ ok: !error });
+  }
+
   const title = typeof body?.title === "string" ? body.title.trim().slice(0, 120) : "";
   if (!title) return new Response("Başlık boş olamaz.", { status: 400 });
 

@@ -73,6 +73,19 @@ function saveChatSnapshot(
 }
 
 /**
+ * Sohbeti VERİTABANINA kaydeder (checklist'ler dahil). localStorage site başına
+ * ayrı olduğu için (localhost ≠ Vercel) zengin sohbet ancak DB'de saklanırsa her
+ * cihaz/sitede aynı görünür. 'chat' sütunu yoksa sunucu sessizce yutar.
+ */
+function saveChatToDb(projectId: string, msgs: ChatMessage[]): void {
+  fetch(`/api/projects/${projectId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat: msgs }),
+  }).catch(() => {});
+}
+
+/**
  * Bir görsel dosyasını küçültüp data URL'e çevirir. Ekran görüntüleri büyük
  * olabiliyor; uzun kenarı en fazla 1600px'e indirip JPEG %85 ile kodluyoruz —
  * hem maliyet hem de model sınırları için makul boyut.
@@ -357,12 +370,21 @@ export default function Home() {
    * halde ilk boş render mevcut yedeği ezerdi.
    */
   const restoredRef = useRef(false);
+  const chatSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sohbeti sakla: başarısız istekler dahil hiçbir mesaj yenilemede kaybolmasın.
-  // Yedek, o an açık projeye (yoksa "local") göre anahtarlanır.
+  // Hem localStorage'a (hızlı, cihaz-yerel) hem DB'ye (paylaşılan, her cihazda
+  // aynı) yazıyoruz; DB yazımı debounce'lu ki her tuşta istek gitmesin.
   useEffect(() => {
     if (!restoredRef.current) return;
     saveChatSnapshot(project?.id ?? null, { messages, html });
+    if (project?.id && dbReady && messages.length) {
+      const pid = project.id;
+      const snapshot = messages;
+      if (chatSaveTimer.current) clearTimeout(chatSaveTimer.current);
+      chatSaveTimer.current = setTimeout(() => saveChatToDb(pid, snapshot), 1200);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, html, project?.id]);
 
   // Panel genişliğini ve seçili stili hatırla.
@@ -490,13 +512,22 @@ export default function Home() {
     setShowProjects(false);
     setShareUrl(null);
 
-    // Sohbeti öncelikle yerel yedekten geri getir — başarısız istekler dahil
-    // her mesaj orada. Yedek yoksa (ör. başka cihazda açılmış proje) sürüm
-    // geçmişinden yeniden kur: her sürüm onu üreten isteği saklıyor.
+    // Sohbeti geri getir. Öncelik: DB (paylaşılan, her cihazda aynı) ve yerel
+    // yedek arasından DAHA UZUN olan — böylece ne başka cihazdaki geçmiş ne de
+    // bu cihazda henüz DB'ye yazılmamış son mesaj kaybolur. İkisi de yoksa sürüm
+    // geçmişinden yeniden kur (eski, genel "Uygulandı." hâli).
     restoredRef.current = true;
-    const snap = loadChatSnapshot(id);
-    if (snap && snap.messages.length) {
-      setMessages(snap.messages);
+    const dbChat: ChatMessage[] | null = Array.isArray(data.project?.chat)
+      ? data.project.chat
+      : null;
+    const local = loadChatSnapshot(id)?.messages ?? null;
+    const chosen =
+      dbChat && local ? (dbChat.length >= local.length ? dbChat : local) : dbChat || local;
+
+    if (chosen && chosen.length) {
+      // setMessages, kalıcılaştırma efektini tetikleyip seçilen sohbeti DB'ye de
+      // yazar — yani yereldeki zengin sohbet DB'ye (ve Vercel'e) kendiliğinden taşınır.
+      setMessages(chosen);
     } else {
       const history: ChatMessage[] = [];
       for (const v of [...(data.versions ?? [])].reverse()) {
