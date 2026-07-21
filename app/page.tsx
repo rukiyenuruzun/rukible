@@ -1338,12 +1338,12 @@ export default function Home() {
                 </button>
               </div>
             ) : m.tone ? (
+              // Karşıdan gelen (asistan) mesaj: baloncuk YOK, düz metin — böylece
+              // sağdaki turuncu baloncuklu kullanıcı mesajından net ayrılır.
               <p
                 key={i}
-                className={`flex items-start gap-2 whitespace-pre-line rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${
-                  m.tone === "ok"
-                    ? "bg-emerald-50 text-emerald-800"
-                    : "bg-amber-50 text-amber-800"
+                className={`flex items-start gap-2 whitespace-pre-line px-1 text-[13px] leading-relaxed ${
+                  m.tone === "ok" ? "text-emerald-700" : "text-amber-700"
                 }`}
               >
                 <span aria-hidden="true">{m.tone === "ok" ? "✓" : "!"}</span>
