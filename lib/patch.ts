@@ -34,6 +34,78 @@ function normalize(text: string): string {
 }
 
 /**
+ * BOŞLUĞA DAYANIKLI EŞLEŞTİRME (son çare).
+ *
+ * Model, düzenlenecek metni birebir kopyalamak yerine sık sık boşlukları/
+ * girintileri değiştirir (çok satırlı class'ları tek satıra toplar, girintiyi
+ * kaydırır). O zaman hiçbir blok tutmaz ve düzenleme "uygulanamadı" görünür.
+ *
+ * Burada hem sayfayı hem aranan metni "tüm boşluk dizisi = tek boşluk" haline
+ * getirip eşleştiriyoruz; ama değişikliği ORİJİNAL sayfaya uygulayabilmek için
+ * her normalize karakterin orijinal konumunu bir haritada tutuyoruz. Böylece
+ * eşleşen bölgeyi orijinalde bulup yalnızca onu değiştiriyoruz; sayfanın geri
+ * kalanı bozulmadan kalıyor.
+ *
+ * Eşleşme yoksa null döner (güvenli: hiçbir şey değişmez).
+ */
+// Yanındaki boşluğun HTML'de anlamsız olduğu sınır karakterleri.
+const BOUNDARY = new Set(["<", ">", "=", '"', "'", "/"]);
+
+/**
+ * Metni HTML-farkında normalize eder: boşluk dizilerini teke indirir, ayrıca
+ * bir etiket sınırı karakterine (< > = " ' /) komşu boşlukları tamamen atar
+ * (çünkü `"\n  >` ile `">` HTML'de aynıdır). Metin içi kelime boşlukları korunur.
+ *
+ * withMap=true ise her normalize karakterin orijinal metindeki indeksini de döner.
+ */
+function htmlNormalize(s: string): { norm: string; map: number[] } {
+  let norm = "";
+  const map: number[] = [];
+  let pendingSpace = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f") {
+      pendingSpace = true;
+      continue;
+    }
+    if (pendingSpace) {
+      const last = norm[norm.length - 1];
+      // Boşluğu yalnızca iki kelime karakteri arasında koru.
+      if (last && !BOUNDARY.has(last) && !BOUNDARY.has(ch)) {
+        norm += " ";
+        map.push(i);
+      }
+      pendingSpace = false;
+    }
+    norm += ch;
+    map.push(i);
+  }
+  return { norm, map };
+}
+
+function fuzzyReplace(
+  html: string,
+  search: string,
+  replace: string,
+): string | null {
+  const normSearch = htmlNormalize(search).norm;
+  if (!normSearch) return null;
+
+  const { norm, map } = htmlNormalize(html);
+
+  const idx = norm.indexOf(normSearch);
+  if (idx === -1) return null;
+  // İkinci bir eşleşme varsa benzersiz değildir — yanlış yeri değiştirmemek için
+  // vazgeç (güvenli tarafta kal).
+  if (norm.indexOf(normSearch, idx + 1) !== -1) return null;
+
+  const startOrig = map[idx];
+  // normSearch sınır karakterine komşu boşlukla bitmez; son karakter konumu güvenli.
+  const endOrig = map[idx + normSearch.length - 1] + 1;
+  return html.slice(0, startOrig) + replace + html.slice(endOrig);
+}
+
+/**
  * `raw` metnini mevcut HTML'e uygular.
  * Model kurala uymayıp tam sayfa dönerse onu da kabul ederiz (güvenli geri düşüş).
  */
@@ -79,6 +151,14 @@ export function applyPatches(current: string, raw: string): PatchOutcome {
     const normalizedSearch = normalize(search);
     if (normalizedHtml.includes(normalizedSearch)) {
       html = normalizedHtml.replace(normalizedSearch, normalize(replace));
+      applied++;
+      continue;
+    }
+
+    // Üçüncü deneme: tüm boşluk farklarını yok sayarak eşleştir (son çare).
+    const fuzzy = fuzzyReplace(html, search, replace);
+    if (fuzzy !== null) {
+      html = fuzzy;
       applied++;
       continue;
     }

@@ -21,6 +21,12 @@ export const MAX_OUTPUT_TOKENS = 16000;
 export const MAX_EDIT_TOKENS = 4000;
 
 /**
+ * Plan modunda çıktı sınırı. Plan kısa metindir; kod üretilmez. Uzun tutmaya
+ * gerek yok, hem ucuz hem odaklı kalsın.
+ */
+export const MAX_PLAN_TOKENS = 2000;
+
+/**
  * Düşünme (reasoning) seviyesi: "low" | "medium" | "high"
  *
  * Kimi K3 cevap yazmadan önce kendi kendine düşünür ve o düşünme metni de

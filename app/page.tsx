@@ -10,6 +10,8 @@ type ChatMessage = {
   content: string;
   /** Bitiş mesajını renklendirmek için: iş tamamlandı mı, kısmen mi. */
   tone?: "ok" | "warn";
+  /** true ise bu asistan mesajı bir plandır; altında "Uygula" düğmesi çıkar. */
+  plan?: boolean;
 };
 type Project = { id: string; title: string; updated_at: string };
 type Version = {
@@ -21,10 +23,96 @@ type Version = {
   html?: string;
 };
 
+/**
+ * SOHBET YEDEĞİ — tarayıcıda saklanır.
+ *
+ * Sohbet, projeye dönünce eskiden yalnızca kaydedilmiş SÜRÜMLERDEN yeniden
+ * kuruluyordu. Uygulanamayan (başarısız) istekler sürüm üretmediği için her
+ * yenilemede kayboluyordu. Artık sohbetin tamamını burada tutuyoruz: başarılı
+ * ya da başarısız, hiçbir mesaj silinmez. Supabase local'de bulunmadığından bu
+ * yedek, dev sunucu yeniden başlasa bile sohbeti korur.
+ */
+const CHAT_STORE_PREFIX = "rukible_chat_v1_";
+
+type ChatSnapshot = { messages: ChatMessage[]; html: string };
+
+function chatStoreKey(projectId?: string | null): string {
+  return CHAT_STORE_PREFIX + (projectId ?? "local");
+}
+
+function loadChatSnapshot(projectId?: string | null): ChatSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(chatStoreKey(projectId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.messages)) {
+      return {
+        messages: parsed.messages,
+        html: typeof parsed.html === "string" ? parsed.html : "",
+      };
+    }
+  } catch {
+    // bozuk ya da erişilemez yedek — yok say
+  }
+  return null;
+}
+
+function saveChatSnapshot(
+  projectId: string | null | undefined,
+  snap: ChatSnapshot,
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(chatStoreKey(projectId), JSON.stringify(snap));
+  } catch {
+    // depolama kotası dolabilir; sessiz geç
+  }
+}
+
 /** Model bazen ```html ... ``` sarmalıyla döndürür; onu temizler. */
 function extractHtml(raw: string): string {
   const fenced = raw.match(/```(?:html)?\s*([\s\S]*?)(?:```|$)/i);
   return (fenced ? fenced[1] : raw).trim();
+}
+
+/**
+ * Çoklu adımlı bir isteği tek tek adımlara böler.
+ *
+ * Model çok işi aynı anda kotaramıyor; onun yerine numaralı adımları ayırıp her
+ * birini ayrı, küçük bir düzenleme olarak sırayla uyguluyoruz. Bir "Uygulanacak
+ * adımlar" bölümü varsa oradan başlıyoruz.
+ *
+ * Önce numaralı adımları ("N." / "N)") arar; 1-2 haneli sayı + nokta/parantez +
+ * boşluk desenini kullanır, böylece "IEC 60529.", "IP54-IP68", "0.4s" gibi metin
+ * içi sayılar bölünmez. Numara yoksa CÜMLE sınırlarından böler (kullanıcı çoğu
+ * kez "şunu yap. bunu yap. şunu düzelt." diye yazar). Tek anlamlı parça çıkarsa
+ * boş döner (tek istek gibi işlenir).
+ */
+function parseSteps(text: string): string[] {
+  // 1) Numaralı adımlar — "Uygulanacak adımlar" bölümü varsa oradan başla.
+  const idx = text.search(/uygulanacak ad[ıi]mlar/i);
+  const scope = idx !== -1 ? text.slice(idx) : text;
+  const numbered: string[] = [];
+  const re = /(?:^|\s)\d{1,2}[.)]\s+([\s\S]*?)(?=\s\d{1,2}[.)]\s|$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(scope)) !== null) {
+    const s = m[1].replace(/\s+/g, " ").trim();
+    if (s.length > 3) numbered.push(s);
+  }
+  if (numbered.length >= 2) return numbered.slice(0, 12);
+
+  // 2) Numara yoksa cümle/satır sınırlarından böl. Her parça en az 2 kelime ve
+  //    8 karakter olsun ki "Evet." gibi doldurma cümleler adım sayılmasın.
+  const pieces = text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter(
+      (s) => s.replace(/[.!?]+$/, "").trim().split(/\s+/).length >= 2 && s.length >= 8,
+    );
+  if (pieces.length >= 2) return pieces.slice(0, 8);
+
+  return [];
 }
 
 /**
@@ -163,6 +251,12 @@ export default function Home() {
   const [notes, setNotes] = useState<string[]>([]);
   const [cost, setCost] = useState<number | null>(null);
 
+  // Build: mesaj sayfayı değiştirir. Plan: model sadece ne yapılacağını konuşur,
+  // sayfaya dokunulmaz; çıkan planın altındaki "Uygula" ile Build'e geçirilir.
+  const [mode, setMode] = useState<"build" | "plan">("build");
+  // Plan modunda akan metni canlı göstermek için (bitince mesaja dönüşür).
+  const [planDraft, setPlanDraft] = useState("");
+
   // Kalıcılık
   const [dbReady, setDbReady] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -201,6 +295,19 @@ export default function Home() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const draggingRef = useRef(false);
+
+  /**
+   * Açılışta sohbet yedekten geri kurulana kadar kaydetmeyi bekletir; aksi
+   * halde ilk boş render mevcut yedeği ezerdi.
+   */
+  const restoredRef = useRef(false);
+
+  // Sohbeti sakla: başarısız istekler dahil hiçbir mesaj yenilemede kaybolmasın.
+  // Yedek, o an açık projeye (yoksa "local") göre anahtarlanır.
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    saveChatSnapshot(project?.id ?? null, { messages, html });
+  }, [messages, html, project?.id]);
 
   // Panel genişliğini hatırla.
   useEffect(() => {
@@ -283,12 +390,18 @@ export default function Home() {
   // araç yine çalışır, sadece kayıt tutmaz.
   useEffect(() => {
     fetch("/api/projects")
-      .then(async (r) => {
-        if (!r.ok) return null;
-        return r.json();
-      })
+      .then(async (r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!data) return;
+        if (!data) {
+          // Supabase yok (ör. local): sohbeti yerel yedekten geri getir ki
+          // yenilemede/dev sunucu restart'ında kaybolmasın.
+          const snap = loadChatSnapshot(null);
+          if (snap) {
+            setMessages(snap.messages);
+            if (snap.html) setHtml(snap.html);
+          }
+          return;
+        }
         setDbReady(true);
         setProjects(data.projects ?? []);
         // Sayfa yenilendiğinde son çalışılan proje kendiliğinden açılsın —
@@ -296,7 +409,17 @@ export default function Home() {
         const latest = data.projects?.[0];
         if (latest) loadProject(latest.id);
       })
-      .catch(() => {});
+      .catch(() => {
+        const snap = loadChatSnapshot(null);
+        if (snap) {
+          setMessages(snap.messages);
+          if (snap.html) setHtml(snap.html);
+        }
+      })
+      .finally(() => {
+        // İlk kurulum bitti: bundan sonra sohbet değişiklikleri kaydedilebilir.
+        restoredRef.current = true;
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -309,15 +432,22 @@ export default function Home() {
     setShowProjects(false);
     setShareUrl(null);
 
-    // Sohbeti versiyon geçmişinden geri kur — her versiyon onu üreten isteği
-    // saklıyor. Böylece projeye dönünce ne konuştuğun kaybolmuyor.
-    const history: ChatMessage[] = [];
-    for (const v of [...(data.versions ?? [])].reverse()) {
-      if (!v.prompt) continue;
-      history.push({ role: "user", content: v.prompt });
-      history.push({ role: "assistant", content: "Uygulandı.", tone: "ok" });
+    // Sohbeti öncelikle yerel yedekten geri getir — başarısız istekler dahil
+    // her mesaj orada. Yedek yoksa (ör. başka cihazda açılmış proje) sürüm
+    // geçmişinden yeniden kur: her sürüm onu üreten isteği saklıyor.
+    restoredRef.current = true;
+    const snap = loadChatSnapshot(id);
+    if (snap && snap.messages.length) {
+      setMessages(snap.messages);
+    } else {
+      const history: ChatMessage[] = [];
+      for (const v of [...(data.versions ?? [])].reverse()) {
+        if (!v.prompt) continue;
+        history.push({ role: "user", content: v.prompt });
+        history.push({ role: "assistant", content: "Uygulandı.", tone: "ok" });
+      }
+      setMessages(history);
     }
-    setMessages(history);
 
     const latest = data.versions?.[0];
     if (latest?.html) {
@@ -368,21 +498,42 @@ export default function Home() {
     setShareUrl(null);
   }
 
-  async function send(preset?: string) {
+  async function send(preset?: string, asBuild?: boolean) {
     const text = (preset ?? input).trim();
     if (!text || streaming) return;
+
+    // "Uygula" düğmesi asBuild=true geçer: seçili mod ne olursa olsun Build çalışır.
+    const activeMode: "build" | "plan" = asBuild ? "build" : mode;
 
     setError(null);
     setNotes([]);
     setCost(null);
-    setStatus(text.includes("http") ? "Sayfa taranıyor…" : "Düşünüyor…");
+    setStatus(
+      activeMode === "plan"
+        ? "Planlanıyor…"
+        : text.includes("http")
+          ? "Sayfa taranıyor…"
+          : "Düşünüyor…",
+    );
     setInput("");
     requestAnimationFrame(autoGrow); // gönderdikten sonra çubuk eski boyuna dönsün
     const nextMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages(nextMessages);
+
+    // Çoklu adım (numaralı istek) + ortada sayfa varsa: tek seferde değil, her
+    // adımı ayrı küçük bir düzenleme olarak SIRAYLA uygula ve tek tek raporla.
+    if (activeMode === "build" && html) {
+      const steps = parseSteps(text);
+      if (steps.length >= 2) {
+        await applyStepwise(steps, text, nextMessages);
+        return;
+      }
+    }
+
     setStreaming(true);
 
-    const target = await ensureProject(text);
+    // Plan modu sürüm üretmez; boş proje açmamak için yalnızca mevcut projeyi kullan.
+    const target = activeMode === "plan" ? project : await ensureProject(text);
 
     try {
       const controller = new AbortController();
@@ -391,7 +542,11 @@ export default function Home() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages, currentHtml: html || undefined }),
+        body: JSON.stringify({
+          messages: nextMessages,
+          currentHtml: html || undefined,
+          mode: activeMode === "plan" ? "plan" : undefined,
+        }),
         signal: controller.signal,
       });
 
@@ -405,7 +560,7 @@ export default function Home() {
       const decoder = new TextDecoder();
       let buffer = "";
       let accumulated = "";
-      let mode: "create" | "edit" = "create";
+      let serverMode: "create" | "edit" | "plan" = "create";
       let spent: number | null = null;
 
       while (true) {
@@ -422,7 +577,7 @@ export default function Home() {
             c?: string;
             r?: string;
             n?: string;
-            m?: "create" | "edit";
+            m?: "create" | "edit" | "plan";
             u?: { cost?: number };
           };
           try {
@@ -431,63 +586,125 @@ export default function Home() {
             continue;
           }
 
-          if (msg.m) mode = msg.m;
+          if (msg.m) serverMode = msg.m;
           if (msg.n) setNotes((prev) => [...prev, msg.n!]);
-          if (msg.r) setStatus("Düşünüyor…");
+          if (msg.r) setStatus(serverMode === "plan" ? "Planlanıyor…" : "Düşünüyor…");
           if (msg.u?.cost != null) {
             spent = msg.u.cost;
             setCost(msg.u.cost);
           }
           if (msg.c) {
             accumulated += msg.c;
-            // Önizlemeyi akış sırasında GÜNCELLEMİYORUZ. Yarım HTML basmak
-            // iframe'i her seferinde yeniden yükletiyor; ekran titriyor ve
-            // sayfa bozukmuş gibi görünüyor. Sonucu bir kerede basıyoruz.
-            setStatus(mode === "edit" ? "Değişiklik hazırlanıyor…" : "Sayfa yazılıyor…");
+            if (serverMode === "plan") {
+              // Plan metnini sohbete CANLI akıt — okurken beklemek yerine oluşurken gör.
+              setPlanDraft(accumulated);
+            } else {
+              // Önizlemeyi akış sırasında GÜNCELLEMİYORUZ. Yarım HTML basmak
+              // iframe'i her seferinde yeniden yükletiyor; ekran titriyor ve
+              // sayfa bozukmuş gibi görünüyor. Sonucu bir kerede basıyoruz.
+              setStatus(serverMode === "edit" ? "Değişiklik hazırlanıyor…" : "Sayfa yazılıyor…");
+            }
           }
         }
       }
 
-      let reply = "Sayfa hazır — sağda görebilirsin.";
-      let tone: "ok" | "warn" = "ok";
-      let finalHtml = "";
-
-      if (mode === "edit") {
-        const result = applyPatches(html, accumulated);
-        finalHtml = result.html;
-        setHtml(result.html);
-        setNotes((prev) => [...prev, ...result.notes]);
-
-        // Modelin en sona koyduğu "---ÖZET---" listesini ayıkla: ne kaldırıldı,
-        // ne eklendi... Mekanik "N değişiklik uygulandı" yerine bunu gösteriyoruz.
-        const summary = accumulated.match(/---ÖZET---\s*([\s\S]*)$/);
-        const changes = summary
-          ? summary[1]
-              .split("\n")
-              .map((l) => l.replace(/^\s*[-•*]\s*/, "").trim())
-              .filter(Boolean)
-          : [];
-
-        if (result.applied === 0) {
-          reply = "Değişikliği uygulayamadım — isteği biraz daha net yazar mısın?";
-          tone = "warn";
-        } else {
-          reply = changes.length
-            ? changes.map((c) => `• ${c}`).join("\n")
-            : "Değişiklik uygulandı.";
-          if (result.failed > 0) {
-            reply += `\n(${result.failed} değişiklik tutmadı, tekrar deneyebilirsin)`;
-            tone = "warn";
-          }
-        }
-        if (result.applied > 0) await saveVersion(target, finalHtml, text, spent);
+      if (serverMode === "plan") {
+        // Plan modu: sayfaya dokunma, sürüm kaydetme. Planı "Uygula" düğmeli bir
+        // asistan mesajına çevir.
+        setPlanDraft("");
+        const planText = accumulated.trim();
+        setMessages([
+          ...nextMessages,
+          planText
+            ? { role: "assistant", content: planText, plan: true }
+            : { role: "assistant", content: "Plan üretemedim, tekrar dener misin?", tone: "warn" },
+        ]);
       } else {
-        finalHtml = extractHtml(accumulated);
-        setHtml(finalHtml);
-        await saveVersion(target, finalHtml, text, spent);
-      }
+        let reply = "Sayfa hazır — sağda görebilirsin.";
+        let tone: "ok" | "warn" = "ok";
+        let finalHtml = "";
 
-      setMessages([...nextMessages, { role: "assistant", content: reply, tone }]);
+        if (serverMode === "edit") {
+          const result = applyPatches(html, accumulated);
+          finalHtml = result.html;
+          setHtml(result.html);
+
+          // Model "bunu yapamam" dediyse (ör. sayfada artık olmayan bir bölümü
+          // geri getirmek): açıklamasını olduğu gibi gösteriyoruz.
+          let cantDoText = "";
+          const cd = accumulated.indexOf("---YAPILAMADI---");
+          if (cd !== -1) {
+            cantDoText = accumulated.slice(cd + "---YAPILAMADI---".length);
+            const oz = cantDoText.indexOf("---ÖZET---");
+            if (oz !== -1) cantDoText = cantDoText.slice(0, oz);
+            cantDoText = cantDoText.trim();
+          }
+
+          // Modelin en sona koyduğu "---ÖZET---" listesi: ne değiştirdiğini söyler.
+          const summary = accumulated.match(/---ÖZET---\s*([\s\S]*)$/);
+          const changes = summary
+            ? summary[1]
+                .split("\n")
+                .map((l) => l.replace(/^\s*[-•*]\s*/, "").trim())
+                .filter(Boolean)
+            : [];
+
+          if (result.applied === 0) {
+            if (cantDoText) {
+              reply = cantDoText;
+              tone = "warn";
+            } else {
+              // Yama tutmadı (model metni birebir kopyalayamadı). Pes etmek yerine
+              // sayfayı tam yeniden yazarak uygula — pahalı ama güvenilir yedek.
+              setStatus("Yama tutmadı, sayfayı yeniden yazarak uyguluyorum…");
+              const rewrite = await streamOnce(
+                [{ role: "user", content: text }],
+                html,
+                controller.signal,
+                "fulledit",
+              );
+              if (rewrite.cost != null) {
+                spent = (spent ?? 0) + rewrite.cost;
+                setCost(spent);
+              }
+              const newHtml = extractHtml(rewrite.content);
+              const looksValid =
+                /<(!doctype|html)[\s>]/i.test(newHtml) && newHtml.length > html.length * 0.5;
+              if (looksValid) {
+                finalHtml = newHtml;
+                setHtml(newHtml);
+                reply = "Hızlı yama tutmadı; sayfayı yeniden yazarak uyguladım.";
+                tone = "ok";
+                await saveVersion(target, newHtml, text, spent);
+              } else {
+                reply =
+                  "Değişikliği uygulayamadım — isteği biraz daha net yazar mısın? " +
+                  "(Birden fazla şey istiyorsan numaralandırarak yaz, daha yeniyim.)";
+                tone = "warn";
+              }
+            }
+          } else {
+            setNotes((prev) => [...prev, ...result.notes]);
+            // Dürüst rapor: gerçek uygulanan sayıyı esas al, modelin dediğini göster.
+            reply = changes.length
+              ? changes.map((c) => `• ${c}`).join("\n")
+              : `${result.applied} değişiklik uyguladım.`;
+            if (result.failed > 0) {
+              reply +=
+                `\n⚠ ${result.failed} değişiklik sayfaya tutmadı. ` +
+                "İstediğin tam olmadıysa sağdaki sürüm geçmişinden geri alabilirsin.";
+              tone = "warn";
+            }
+            await saveVersion(target, finalHtml, text, spent);
+          }
+        } else {
+          finalHtml = extractHtml(accumulated);
+          setHtml(finalHtml);
+          await saveVersion(target, finalHtml, text, spent);
+        }
+
+        setMessages([...nextMessages, { role: "assistant", content: reply, tone }]);
+      }
     } catch (err) {
       // Kullanıcı durdurduysa bu bir hata değil.
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -495,6 +712,172 @@ export default function Home() {
           ...nextMessages,
           { role: "assistant", content: "Durduruldu.", tone: "warn" },
         ]);
+      } else {
+        setError(err instanceof Error ? err.message : "Beklenmeyen bir hata oluştu.");
+      }
+    } finally {
+      abortRef.current = null;
+      setStreaming(false);
+      setStatus("");
+      setPlanDraft(""); // yarım kalan plan taslağını temizle
+      refreshUsage();
+    }
+  }
+
+  /** Bir planı Build modunda çalıştırır (plan mesajının "Uygula" düğmesi). */
+  function applyPlan(planText: string) {
+    const steps = parseSteps(planText);
+    if (steps.length >= 2 && html) {
+      const nextMessages: ChatMessage[] = [
+        ...messages,
+        { role: "user", content: "Planı uygula" },
+      ];
+      setMessages(nextMessages);
+      applyStepwise(steps, "Planı uygula", nextMessages);
+    } else {
+      // Tek adımlık plan ya da henüz sayfa yoksa normal akış.
+      send(`Aşağıdaki planı uygula:\n\n${planText}`, true);
+    }
+  }
+
+  /** Tek bir düzenleme çağrısını akıtır; içeriği ve maliyeti döndürür. */
+  async function streamOnce(
+    msgs: ChatMessage[],
+    baseHtml: string,
+    signal: AbortSignal,
+    reqMode?: "fulledit",
+  ): Promise<{ content: string; cost: number | null }> {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: msgs,
+        currentHtml: baseHtml || undefined,
+        mode: reqMode,
+      }),
+      signal,
+    });
+    if (!res.ok || !res.body) throw new Error(await res.text());
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let content = "";
+    let cost: number | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const raw of lines) {
+        if (!raw.trim()) continue;
+        let msg: { c?: string; n?: string; u?: { cost?: number } };
+        try {
+          msg = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        if (msg.c) content += msg.c;
+        if (msg.n) setNotes((prev) => [...prev, msg.n!]);
+        if (msg.u?.cost != null) cost = msg.u.cost;
+      }
+    }
+    return { content, cost };
+  }
+
+  /**
+   * Çoklu adımlı bir isteği SIRAYLA uygular: her adımı ayrı küçük bir düzenleme
+   * olarak çalıştırır, sonucu bir sonraki adıma taşır ve her adımı tek tek
+   * raporlar ("✓ 1. …", "✗ 2. … uygulanamadı"). Küçük düzenlemeler güvenilir
+   * tuttuğu için hem daha sağlam çalışır hem de ne yapıldığını net gösterir.
+   */
+  async function applyStepwise(
+    steps: string[],
+    originalText: string,
+    baseMessages: ChatMessage[],
+  ) {
+    setError(null);
+    setNotes([]);
+    setCost(null);
+    setStreaming(true);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const target = await ensureProject(originalText);
+    let workingHtml = html;
+    let msgs = baseMessages;
+    let totalCost = 0;
+    let anyApplied = false;
+
+    try {
+      for (let i = 0; i < steps.length; i++) {
+        setStatus(`Adım ${i + 1}/${steps.length}…`);
+        const { content, cost } = await streamOnce(
+          [{ role: "user", content: steps[i] }],
+          workingHtml,
+          controller.signal,
+        );
+        if (cost) totalCost += cost;
+
+        const result = applyPatches(workingHtml, content);
+        // Yalnızca gerçek yama uygulandıysa sayfayı ilerlet; tek adımda tüm
+        // sayfayı yeniden yazmasına (full) veya boş dönmesine izin verme.
+        let ok = result.mode === "patch" && result.applied > 0;
+        if (ok) {
+          workingHtml = result.html;
+          setHtml(workingHtml);
+          anyApplied = true;
+        } else {
+          // Bu adımın yaması tutmadı — tam yeniden yazımla dene (güvenilir yedek).
+          setStatus(`Adım ${i + 1}/${steps.length} — yeniden yazımla…`);
+          const rw = await streamOnce(
+            [{ role: "user", content: steps[i] }],
+            workingHtml,
+            controller.signal,
+            "fulledit",
+          );
+          if (rw.cost) totalCost += rw.cost;
+          const newHtml = extractHtml(rw.content);
+          if (/<(!doctype|html)[\s>]/i.test(newHtml) && newHtml.length > workingHtml.length * 0.5) {
+            workingHtml = newHtml;
+            setHtml(workingHtml);
+            anyApplied = true;
+            ok = true;
+          }
+        }
+
+        // Kullanıcının cümlesini tekrar etme — modelin NE YAPTIĞINI (ÖZET) yaz.
+        // (Baştaki ✓/! işaretini mesaj kutusu kendisi ekliyor, buraya koymuyoruz.)
+        const ozet = content.match(/---ÖZET---\s*([\s\S]*)/);
+        const done = ozet
+          ? ozet[1]
+              .split("\n")
+              .map((l) => l.replace(/^\s*[-•*]\s*/, "").trim())
+              .filter(Boolean)
+              .join("; ")
+          : "";
+
+        msgs = [
+          ...msgs,
+          {
+            role: "assistant",
+            content: ok
+              ? `${i + 1}. ${done || "yapıldı"}`
+              : `${i + 1}. ${steps[i]} — uygulanamadı`,
+            tone: ok ? "ok" : "warn",
+          },
+        ];
+        setMessages(msgs);
+      }
+
+      if (anyApplied) await saveVersion(target, workingHtml, originalText, totalCost || null);
+      setCost(totalCost || null);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setMessages([...msgs, { role: "assistant", content: "Durduruldu.", tone: "warn" }]);
       } else {
         setError(err instanceof Error ? err.message : "Beklenmeyen bir hata oluştu.");
       }
@@ -633,6 +1016,14 @@ export default function Home() {
     }
     setProjects((prev) => prev.filter((p) => p.id !== id));
     setConfirmDelete(null);
+    // Projenin sohbet yedeğini de temizle — arkada çöp kalmasın.
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem(chatStoreKey(id));
+      } catch {
+        // erişilemezse önemli değil
+      }
+    }
     if (project?.id === id) newProject();
   }
 
@@ -782,6 +1173,25 @@ export default function Home() {
               >
                 {m.content}
               </div>
+            ) : m.plan ? (
+              <div
+                key={i}
+                className="rounded-2xl border border-orange-200 bg-orange-50/60 px-4 py-3"
+              >
+                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-orange-500">
+                  <span aria-hidden="true">◇</span> Plan
+                </div>
+                <div className="whitespace-pre-line text-[13px] leading-relaxed text-stone-700">
+                  {m.content}
+                </div>
+                <button
+                  onClick={() => applyPlan(m.content)}
+                  disabled={streaming}
+                  className="mt-3 rounded-lg bg-orange-400 px-3.5 py-1.5 text-[12px] font-medium text-white transition hover:bg-orange-500 disabled:opacity-40"
+                >
+                  Uygula →
+                </button>
+              </div>
             ) : m.tone ? (
               <p
                 key={i}
@@ -801,13 +1211,24 @@ export default function Home() {
             ),
           )}
 
+          {planDraft && (
+            <div className="rounded-2xl border border-orange-200 bg-orange-50/60 px-4 py-3">
+              <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-orange-500">
+                <span aria-hidden="true">◇</span> Plan
+              </div>
+              <div className="whitespace-pre-line text-[13px] leading-relaxed text-stone-700">
+                {planDraft}
+              </div>
+            </div>
+          )}
+
           {notes.map((n, i) => (
             <p key={i} className="text-[11px] text-stone-400">
               ✳︎ {n}
             </p>
           ))}
 
-          {streaming && (
+          {streaming && !planDraft && (
             <p className="flex items-center gap-2 text-[13px] text-stone-400">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-400" />
               {status || "Çiziliyor…"}
@@ -885,6 +1306,31 @@ export default function Home() {
           )}
 
           <div className="rounded-3xl bg-white/80 p-2 shadow-[0_1px_3px_rgba(120,80,60,0.06)]">
+            {/* Build / Plan geçişi */}
+            <div className="mb-1 flex gap-1 px-1">
+              <button
+                onClick={() => setMode("build")}
+                title="Sayfayı değiştirir"
+                className={`rounded-full px-3 py-1 text-[11.5px] font-medium transition ${
+                  mode === "build"
+                    ? "bg-orange-400 text-white"
+                    : "text-stone-400 hover:text-stone-600"
+                }`}
+              >
+                Build
+              </button>
+              <button
+                onClick={() => setMode("plan")}
+                title="Sayfaya dokunmadan ne yapılacağını konuşur"
+                className={`rounded-full px-3 py-1 text-[11.5px] font-medium transition ${
+                  mode === "plan"
+                    ? "bg-orange-400 text-white"
+                    : "text-stone-400 hover:text-stone-600"
+                }`}
+              >
+                Plan
+              </button>
+            </div>
             <textarea
               ref={inputRef}
               value={input}
@@ -899,7 +1345,11 @@ export default function Home() {
                 }
               }}
               rows={2}
-              placeholder="Nasıl bir sayfa olsun?"
+              placeholder={
+                mode === "plan"
+                  ? "Ne yapmak istediğini konuş — sayfa değişmez"
+                  : "Nasıl bir sayfa olsun?"
+              }
               className="w-full resize-none overflow-y-auto bg-transparent px-3 py-2 text-[13px] leading-relaxed text-stone-700 outline-none placeholder:text-stone-300"
             />
             {streaming ? (
@@ -915,7 +1365,7 @@ export default function Home() {
                 disabled={!input.trim()}
                 className="w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
               >
-                Gönder
+                {mode === "plan" ? "Planla" : "Gönder"}
               </button>
             )}
           </div>

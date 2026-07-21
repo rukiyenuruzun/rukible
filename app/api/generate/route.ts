@@ -3,9 +3,16 @@ import {
   MODEL,
   MAX_OUTPUT_TOKENS,
   MAX_EDIT_TOKENS,
+  MAX_PLAN_TOKENS,
   OPENROUTER_BASE_URL,
+  REASONING_EFFORT_HARD,
 } from "@/lib/config";
-import { SYSTEM_PROMPT, EDIT_SYSTEM_PROMPT } from "@/lib/prompt";
+import {
+  SYSTEM_PROMPT,
+  EDIT_SYSTEM_PROMPT,
+  PLAN_SYSTEM_PROMPT,
+  FULL_EDIT_SYSTEM_PROMPT,
+} from "@/lib/prompt";
 import { chooseEffort } from "@/lib/intent";
 import { extractUrls, fetchPageProfile, profileToPrompt } from "@/lib/fetchPage";
 
@@ -38,26 +45,39 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { messages?: ChatMessage[]; currentHtml?: string };
+  let body: { messages?: ChatMessage[]; currentHtml?: string; mode?: string };
   try {
     body = await req.json();
   } catch {
     return new Response("Geçersiz istek gövdesi.", { status: 400 });
   }
 
-  const { messages = [], currentHtml } = body;
+  const { messages = [], currentHtml, mode } = body;
   if (messages.length === 0) {
     return new Response("Mesaj bulunamadı.", { status: 400 });
   }
 
   const client = new OpenAI({ apiKey, baseURL: OPENROUTER_BASE_URL });
 
+  // Plan modu: model kod üretmez, sadece ne yapılacağını planlar.
+  const isPlan = mode === "plan";
+  // Tam yeniden yazım: yama tutmadığında yedek — model tüm sayfayı değişiklikle
+  // yeniden yazar (pahalı ama güvenilir).
+  const isFullEdit = mode === "fulledit";
   // Ortada bir sayfa varsa düzenleme modundayız: model tüm sayfayı değil,
   // sadece değişecek blokları döndürür. Maliyetin büyük kısmı burada düşüyor.
-  const isEdit = Boolean(currentHtml);
+  const isEdit = !isPlan && !isFullEdit && Boolean(currentHtml);
+
+  const systemPrompt = isPlan
+    ? PLAN_SYSTEM_PROMPT
+    : isFullEdit
+      ? FULL_EDIT_SYSTEM_PROMPT
+      : isEdit
+        ? EDIT_SYSTEM_PROMPT
+        : SYSTEM_PROMPT;
 
   const conversation: { role: "system" | "user" | "assistant"; content: string }[] = [
-    { role: "system", content: isEdit ? EDIT_SYSTEM_PROMPT : SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt },
   ];
 
   // Son mesajda link varsa sayfayı sunucu tarafında çekip modele veriyoruz.
@@ -85,29 +105,63 @@ export async function POST(req: Request) {
   }
 
   if (currentHtml) {
-    conversation.push({
-      role: "user",
-      content:
-        "Düzenlenecek sayfanın tamamı aşağıdadır. SEARCH bloklarını buradan " +
-        `birebir kopyala:\n\n${currentHtml}`,
-    });
-    conversation.push({
-      role: "assistant",
-      content: "Sayfayı aldım. Değişiklik isteğini SEARCH/REPLACE olarak döneceğim.",
-    });
+    if (isPlan) {
+      conversation.push({
+        role: "user",
+        content:
+          "Üzerinde konuşacağımız mevcut sayfanın tamamı aşağıdadır. Buna bakarak " +
+          `planla; kodu DEĞİŞTİRME, sadece ne yapılacağını anlat:\n\n${currentHtml}`,
+      });
+      conversation.push({
+        role: "assistant",
+        content: "Sayfayı inceledim. Ne yapmak istediğini söyle, planlayalım.",
+      });
+    } else if (isFullEdit) {
+      conversation.push({
+        role: "user",
+        content:
+          "Aşağıdaki sayfaya istenen değişikliği uygula ve sayfanın TAMAMINI döndür. " +
+          `Değişiklik dışındaki her şeyi birebir koru:\n\n${currentHtml}`,
+      });
+      conversation.push({
+        role: "assistant",
+        content: "Tamam. Değişikliği uygulayıp sayfanın tamamını döndüreceğim.",
+      });
+    } else {
+      conversation.push({
+        role: "user",
+        content:
+          "Düzenlenecek sayfanın tamamı aşağıdadır. SEARCH bloklarını buradan " +
+          `birebir kopyala:\n\n${currentHtml}`,
+      });
+      conversation.push({
+        role: "assistant",
+        content: "Sayfayı aldım. Değişiklik isteğini SEARCH/REPLACE olarak döneceğim.",
+      });
+    }
   }
 
   conversation.push(...messages);
 
   // Belirsiz/çok parçalı isteklerde model daha çok düşünsün; net isteklerde
   // taban seviyede kalıp ucuz çalışsın. (bkz. lib/intent.ts)
-  const effort = chooseEffort(lastUserMessage?.content ?? "");
+  // Plan ve tam yeniden yazım daha ağır işler; düşük seviyede model tembelleşip
+  // değişikliği hiç yapmayabiliyor — bu ikisinde taban en az "medium".
+  const baseEffort = chooseEffort(lastUserMessage?.content ?? "");
+  const effort =
+    (isPlan || isFullEdit) && baseEffort === "low" ? REASONING_EFFORT_HARD : baseEffort;
+
+  const maxTokens = isPlan
+    ? MAX_PLAN_TOKENS
+    : isEdit
+      ? MAX_EDIT_TOKENS
+      : MAX_OUTPUT_TOKENS;
 
   try {
     // `reasoning` ve `usage` OpenRouter'a özgü alanlar, OpenAI tiplerinde yok.
     const params = {
       model: MODEL,
-      max_tokens: isEdit ? MAX_EDIT_TOKENS : MAX_OUTPUT_TOKENS,
+      max_tokens: maxTokens,
       stream: true,
       stream_options: { include_usage: true },
       reasoning: { effort },
@@ -118,8 +172,8 @@ export async function POST(req: Request) {
 
     const readable = new ReadableStream({
       async start(controller) {
-        // İstemci bu işareti görüp gelen metni yama mı sayfa mı diye ayırır.
-        controller.enqueue(line({ m: isEdit ? "edit" : "create" }));
+        // İstemci bu işareti görüp gelen metni plan/yama/sayfa diye ayırır.
+        controller.enqueue(line({ m: isPlan ? "plan" : isEdit ? "edit" : "create" }));
         for (const note of notes) controller.enqueue(line({ n: note }));
 
         try {

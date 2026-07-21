@@ -24,6 +24,14 @@ const VAGUE =
  */
 const OPEN_ENDED = /(ne yapsak|nasıl daha|öner|fikrin|sence|sen karar|bilmiyorum)/;
 
+/**
+ * Gözlem/şikayet ifadeleri: emir yok ama örtük bir "şunu düzelt" var
+ * ("başlıklar çok büyük", "burası boş duruyor", "fazla sıkışık"). Modelin önce
+ * neyin sorun olduğunu ve ne kadar düzelteceğini yorumlaması gerekir.
+ */
+const OBSERVATION =
+  /(çok|fazla|aşırı|gereğinden|baya|epey) (büyük|küçük|uzun|kısa|geniş|dar|kalın|ince|koyu|açık|renkli|sade|boş|dolu|sıkışık|dağınık|yakın|uzak)|(boş duruyor|boş kalmış|boş görünüyor|sıkışık|dağınık|göze batıyor|orantısız|dengesiz|birbirine girmiş)/;
+
 /** Yaklaşık kelime sayısı. */
 function wordCount(text: string): number {
   const t = text.trim();
@@ -37,7 +45,7 @@ function wordCount(text: string): number {
  */
 export function needsDeepReasoning(text: string): boolean {
   const t = text.toLocaleLowerCase("tr-TR");
-  if (VAGUE.test(t) || OPEN_ENDED.test(t)) return true;
+  if (VAGUE.test(t) || OPEN_ENDED.test(t) || OBSERVATION.test(t)) return true;
 
   // Güçlü çoklu-görev sinyalleri: tek başına "birden fazla iş" demek.
   const strongMultiTask = /(\bayrıca\b| bir de |aynı zamanda|bunun yanında|hem .* hem )/;
