@@ -4,9 +4,9 @@ import {
   MAX_OUTPUT_TOKENS,
   MAX_EDIT_TOKENS,
   OPENROUTER_BASE_URL,
-  REASONING_EFFORT,
 } from "@/lib/config";
 import { SYSTEM_PROMPT, EDIT_SYSTEM_PROMPT } from "@/lib/prompt";
+import { chooseEffort } from "@/lib/intent";
 import { extractUrls, fetchPageProfile, profileToPrompt } from "@/lib/fetchPage";
 
 // Uzun üretimler için gerekli (Vercel'de varsayılan limit çok kısa).
@@ -99,6 +99,10 @@ export async function POST(req: Request) {
 
   conversation.push(...messages);
 
+  // Belirsiz/çok parçalı isteklerde model daha çok düşünsün; net isteklerde
+  // taban seviyede kalıp ucuz çalışsın. (bkz. lib/intent.ts)
+  const effort = chooseEffort(lastUserMessage?.content ?? "");
+
   try {
     // `reasoning` ve `usage` OpenRouter'a özgü alanlar, OpenAI tiplerinde yok.
     const params = {
@@ -106,7 +110,7 @@ export async function POST(req: Request) {
       max_tokens: isEdit ? MAX_EDIT_TOKENS : MAX_OUTPUT_TOKENS,
       stream: true,
       stream_options: { include_usage: true },
-      reasoning: { effort: REASONING_EFFORT },
+      reasoning: { effort },
       messages: conversation,
     } as unknown as OpenAI.ChatCompletionCreateParamsStreaming;
 

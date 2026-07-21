@@ -24,11 +24,16 @@ export const MAX_EDIT_TOKENS = 4000;
  * Düşünme (reasoning) seviyesi: "low" | "medium" | "high"
  *
  * Kimi K3 cevap yazmadan önce kendi kendine düşünür ve o düşünme metni de
- * çıkış tokeni olarak faturalanır ($15/1M). Sayfa üretimi çok derin akıl
- * yürütme gerektirmediği için varsayılan "low" — maliyeti belirgin düşürür.
- * Karmaşık isteklerde çıktı kalitesi yetersiz gelirse "medium" dene.
+ * çıkış tokeni olarak faturalanır ($15/1M). Net ve mekanik istekler derin akıl
+ * yürütme gerektirmediği için taban seviye "low" — maliyeti düşük tutar.
+ *
+ * Belirsiz/öznel ("biraz canlandır") veya çok parçalı istekler ise yorum ister;
+ * bu durumda seviye otomatik REASONING_EFFORT_HARD'a yükselir (bkz. lib/intent.ts).
+ * Düzenlemede çıktı zaten minik olduğu için bu, anlama kalitesini az maliyetle
+ * artırır.
  */
 export const REASONING_EFFORT = "low";
+export const REASONING_EFFORT_HARD = "medium";
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
