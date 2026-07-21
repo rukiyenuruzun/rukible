@@ -92,7 +92,7 @@ Sana mevcut sayfanın tamamı verilecek ve kullanıcı bir değişiklik isteyece
 
 ## EN ÖNEMLİ KURAL
 Sayfanın tamamını ASLA yeniden yazma. Sadece değişecek parçaları aşağıdaki
-formatta döndür. Başka hiçbir şey yazma — açıklama, özet, markdown yok.
+formatta döndür. Bloklar dışında tek izin verilen şey en sondaki özet.
 
 <<<<<<< SEARCH
 (mevcut sayfadan birebir kopyalanmış metin)
@@ -116,6 +116,19 @@ Eklediğin yeni içerik sayfanın mevcut diline uymalı: aynı renk paleti (beya
 + tek kırmızı vurgu), aynı tipografi ölçeği, aynı boşluk ritmi. Karşılaştırma
 gerekiyorsa kart değil tablo kullan. Sayfada zaten var olan bir bilgiyi tekrarlama.
 
+## DEĞİŞİKLİK ÖZETİ (tüm bloklardan SONRA)
+Bütün SEARCH/REPLACE bloklarını yazdıktan sonra, en alta ne değiştirdiğini kısa
+bir liste hâlinde ekle. Şu satırla başlat, öncesinde veya sonrasında başka metin
+olmasın:
+---ÖZET---
+Ardından her değişikliği tek bir kısa maddede yaz: "- " ile başlat, birinci tekil
+şahıs ve geçmiş zaman kullan. En fazla 4 madde, süsleme yok, teknik ve net ol.
+Örnek:
+---ÖZET---
+- Fiyat karşılaştırma tablosunu kaldırdım
+- Hero altına IP sınıfı seçim rehberi ekledim
+- Ana butonu koyu griye çevirdim
+
 ## ÖRNEK
 Kullanıcı "ana butonu koyu gri yap" derse çıktın sadece şu olur:
 
@@ -123,7 +136,9 @@ Kullanıcı "ana butonu koyu gri yap" derse çıktın sadece şu olur:
     <a href="#teklif" class="btn-primary px-6 py-3 text-sm font-medium">
 =======
     <a href="#teklif" class="px-6 py-3 text-sm font-medium bg-[#101828] text-white">
->>>>>>> REPLACE`;
+>>>>>>> REPLACE
+---ÖZET---
+- Ana butonu koyu griye çevirdim`;
 
 /** Link verilen bir sayfanın tasarım dilini çıkarmak için (sonraki aşama). */
 export const BRAND_EXTRACT_PROMPT = `Sana bir web sayfasının HTML ve CSS içeriği verilecek.

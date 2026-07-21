@@ -457,14 +457,28 @@ export default function Home() {
         finalHtml = result.html;
         setHtml(result.html);
         setNotes((prev) => [...prev, ...result.notes]);
+
+        // Modelin en sona koyduğu "---ÖZET---" listesini ayıkla: ne kaldırıldı,
+        // ne eklendi... Mekanik "N değişiklik uygulandı" yerine bunu gösteriyoruz.
+        const summary = accumulated.match(/---ÖZET---\s*([\s\S]*)$/);
+        const changes = summary
+          ? summary[1]
+              .split("\n")
+              .map((l) => l.replace(/^\s*[-•*]\s*/, "").trim())
+              .filter(Boolean)
+          : [];
+
         if (result.applied === 0) {
           reply = "Değişikliği uygulayamadım — isteği biraz daha net yazar mısın?";
           tone = "warn";
-        } else if (result.failed > 0) {
-          reply = `${result.applied} değişiklik uygulandı, ${result.failed} tanesi tutmadı.`;
-          tone = "warn";
         } else {
-          reply = "Değişiklik uygulandı.";
+          reply = changes.length
+            ? changes.map((c) => `• ${c}`).join("\n")
+            : "Değişiklik uygulandı.";
+          if (result.failed > 0) {
+            reply += `\n(${result.failed} değişiklik tutmadı, tekrar deneyebilirsin)`;
+            tone = "warn";
+          }
         }
         if (result.applied > 0) await saveVersion(target, finalHtml, text, spent);
       } else {
@@ -771,7 +785,7 @@ export default function Home() {
             ) : m.tone ? (
               <p
                 key={i}
-                className={`flex items-start gap-2 rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${
+                className={`flex items-start gap-2 whitespace-pre-line rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${
                   m.tone === "ok"
                     ? "bg-emerald-50 text-emerald-800"
                     : "bg-amber-50 text-amber-800"

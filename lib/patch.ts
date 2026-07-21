@@ -88,7 +88,8 @@ export function applyPatches(current: string, raw: string): PatchOutcome {
     notes.push(`Eşleşmedi: "${preview}…"`);
   }
 
-  if (applied > 0) notes.unshift(`${applied} değişiklik uygulandı.`);
-
+  // Not: "N değişiklik uygulandı" özetini bilerek eklemiyoruz — arayüz artık
+  // modelin döndürdüğü madde madde değişiklik listesini gösteriyor. Burada
+  // yalnızca tutmayan bloklar için tanı notları kalır.
   return { html, mode: "patch", applied, failed, notes };
 }
