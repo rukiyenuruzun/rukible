@@ -11,6 +11,53 @@
  */
 export const MODEL = process.env.MODEL ?? "moonshotai/kimi-k3";
 
+/**
+ * "Var olan proje" (git repo) modundaki araçlı (agentic) döngünün modeli.
+ *
+ * Bu döngü function-calling (tool use) kullanır — model dosyaları okuyup yazmak
+ * için araç çağırır. Varsayılan: kimi-k2.7-code — kodlamaya özel, araç kullanımı
+ * çalışıyor (test edildi) ve ÇOK ucuz (~$0.85/$3.8 per 1M; Claude Sonnet'in kat
+ * kat altı). Değiştirmek serbest:
+ *   "moonshotai/kimi-k2.7-code"    -> ucuz + kodlamaya özel (varsayılan)
+ *   "moonshotai/kimi-k3"           -> senin üreteç modelin (daha pahalı)
+ *   "anthropic/claude-sonnet-4.5"  -> en sağlam ama pahalı
+ *   "anthropic/claude-haiku-4.5"   -> ucuz Claude
+ */
+export const AGENT_MODEL =
+  process.env.AGENT_MODEL ?? "moonshotai/kimi-k2.7-code";
+
+/**
+ * Repo modu yereldir (disk + git gerekir). Vercel'de kapatmak için bu bayrağı
+ * "0"/"false" yap; arayüz "Var olan proje" seçeneğini gizler.
+ */
+export const REPO_MODE_ENABLED =
+  (process.env.REPO_MODE_ENABLED ?? "1") !== "0" &&
+  (process.env.REPO_MODE_ENABLED ?? "true").toLowerCase() !== "false";
+
+/** Klonlanan repoların tutulduğu kök klasör (proje kökünde, .gitignore'lu). */
+export const WORKDIR_ROOT = ".rukible-workdir";
+
+/** Repo modu emniyet sınırları (kaçak/DoS freni). */
+export const REPO_LIMITS = {
+  /** Klon başına en fazla dosya. */
+  maxFiles: 4000,
+  /** Klon başına en fazla toplam bayt. */
+  maxBytes: 80 * 1024 * 1024, // 80 MB
+  /** Tek bir dosyayı modele okuturken en fazla bayt. */
+  maxReadBytes: 256 * 1024, // 256 KB
+  /** write_file ile yazılabilecek en fazla bayt. */
+  maxWriteBytes: 512 * 1024, // 512 KB
+  /** git clone zaman aşımı (ms). */
+  cloneTimeoutMs: 90_000,
+  /** Araçlı döngüde en fazla model turu. */
+  maxTurns: 16,
+  /** Araçlı döngüde toplam en fazla araç çağrısı. */
+  maxToolCalls: 60,
+} as const;
+
+/** Repo modu araçlı döngüsünde tur başına maksimum çıktı tokeni. */
+export const MAX_AGENT_TOKENS = 8000;
+
 /** Yeni sayfa üretiminde izin verilen maksimum çıktı uzunluğu (token). */
 export const MAX_OUTPUT_TOKENS = 16000;
 

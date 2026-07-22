@@ -16,6 +16,7 @@ import {
 } from "@/lib/prompt";
 import { chooseEffort } from "@/lib/intent";
 import { extractUrls, fetchPageProfile, profileToPrompt } from "@/lib/fetchPage";
+import { line } from "@/lib/ndjson";
 
 // Uzun üretimler için gerekli (Vercel'de varsayılan limit çok kısa).
 export const maxDuration = 300;
@@ -24,17 +25,6 @@ export const maxDuration = 300;
 const MAX_URLS_PER_REQUEST = 2;
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
-
-/**
- * Akış NDJSON formatında: her satır bir JSON nesnesi.
- *   {"c": "..."} -> sayfa HTML'i (içerik)
- *   {"r": "..."} -> modelin düşünme metni (HTML'e KARIŞMAMALI)
- *   {"n": "..."} -> kullanıcıya gösterilecek durum notu
- *   {"u": {...}} -> bitişte token ve maliyet bilgisi
- */
-function line(obj: unknown): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify(obj) + "\n");
-}
 
 export async function POST(req: Request) {
   const apiKey = process.env.OPENROUTER_API_KEY;

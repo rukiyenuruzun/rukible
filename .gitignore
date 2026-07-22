@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# rukible: klonlanan repoların çalışma kopyaları (yerel repo modu)
+/.rukible-workdir/
+
 # production
 /build
 

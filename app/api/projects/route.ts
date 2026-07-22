@@ -10,7 +10,7 @@ export async function GET() {
 
   const { data, error } = await db
     .from("projects")
-    .select("id, title, created_at, updated_at")
+    .select("id, title, kind, repo_url, created_at, updated_at")
     .order("updated_at", { ascending: false })
     .limit(50);
 
@@ -24,10 +24,16 @@ export async function POST(req: Request) {
   if (!db) return new Response(NOT_CONFIGURED, { status: 503 });
 
   let title = "Adsız proje";
+  let kind: "page" | "repo" = "page";
+  let repoUrl: string | null = null;
   try {
     const body = await req.json();
     if (typeof body?.title === "string" && body.title.trim()) {
       title = body.title.trim().slice(0, 120);
+    }
+    if (body?.kind === "repo") kind = "repo";
+    if (typeof body?.repo_url === "string" && body.repo_url.trim()) {
+      repoUrl = body.repo_url.trim().slice(0, 500);
     }
   } catch {
     // gövde yoksa varsayılan başlıkla devam
@@ -35,8 +41,8 @@ export async function POST(req: Request) {
 
   const { data, error } = await db
     .from("projects")
-    .insert({ title })
-    .select("id, title, created_at, updated_at")
+    .insert({ title, kind, repo_url: repoUrl })
+    .select("id, title, kind, repo_url, created_at, updated_at")
     .single();
 
   if (error) return new Response(error.message, { status: 500 });

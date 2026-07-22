@@ -52,7 +52,7 @@ export async function POST(req: Request) {
   }
 
   const response = isForm
-    ? NextResponse.redirect(new URL("/", req.url), 303)
+    ? NextResponse.redirect(new URL("/basla", req.url), 303)
     : NextResponse.json({ ok: true });
 
   response.cookies.set(COOKIE_NAME, expected, COOKIE_OPTIONS);

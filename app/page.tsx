@@ -483,10 +483,14 @@ export default function Home() {
           return;
         }
         setDbReady(true);
-        setProjects(data.projects ?? []);
-        // Sayfa yenilendiğinde son çalışılan proje kendiliğinden açılsın —
-        // aksi halde her yenilemede her şey kaybolmuş gibi görünüyor.
-        const latest = data.projects?.[0];
+        // Repo (kind='repo') projeleri BU tarafta gösterilmez; onların kendi
+        // arayüzü var (/repo). Burada yalnız sayfa üreteci projeleri listelenir.
+        const pages = (data.projects ?? []).filter(
+          (p: { kind?: string }) => p.kind !== "repo",
+        );
+        setProjects(pages);
+        // Sayfa yenilendiğinde son çalışılan (sayfa) proje kendiliğinden açılsın.
+        const latest = pages[0];
         if (latest) loadProject(latest.id);
       })
       .catch(() => {
@@ -1198,6 +1202,14 @@ export default function Home() {
               <div className="mt-1.5 text-[12px] text-orange-400">{SLOGAN}</div>
             </div>
           </div>
+
+          <a
+            href="/repo"
+            title="Var olan bir git reposu üstünde çalış"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-1.5 text-[12px] font-medium text-stone-600 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50"
+          >
+            🗂 Var olan proje →
+          </a>
 
           {dbReady && (
             <div className="mt-5">

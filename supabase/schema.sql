@@ -15,6 +15,12 @@ create table if not exists projects (
 -- Daha önce kurduysan bu satır 'chat' sütununu ekler (varsa dokunmaz):
 alter table projects add column if not exists chat jsonb;
 
+-- "Var olan proje" (git repo) modu için: proje türü ve repo adresi.
+--   kind='page' -> klasik tek-sayfa üreteci (varsayılan, eski projeler dahil)
+--   kind='repo' -> klonlanan bir git reposu üstünde çalışılıyor
+alter table projects add column if not exists kind text not null default 'page';
+alter table projects add column if not exists repo_url text;
+
 -- Her üretim ve her düzenleme ayrı bir versiyon olarak saklanır.
 -- Geri alma böyle çalışır: eski versiyonu seçmen yeterli, hiçbir şey silinmez.
 create table if not exists versions (
