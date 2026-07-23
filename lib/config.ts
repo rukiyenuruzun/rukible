@@ -27,12 +27,17 @@ export const AGENT_MODEL =
   process.env.AGENT_MODEL ?? "moonshotai/kimi-k2.7-code";
 
 /**
- * Repo modu yereldir (disk + git gerekir). Vercel'de kapatmak için bu bayrağı
- * "0"/"false" yap; arayüz "Var olan proje" seçeneğini gizler.
+ * Repo modu yereldir (disk + git gerekir) ve KLONLANAN REPONUN KODUNU ÇALIŞTIRIR.
+ *
+ * Bu yüzden varsayılan KAPALI: güvenilmeyen kod çalıştıran bir özellik açıkça
+ * istenmeden açılmamalı (yanlışlıkla deploy edilen bir ortamda sessizce
+ * etkin kalmasın). Yerelde açmak için `.env.local` içine:
+ *   REPO_MODE_ENABLED=1
+ * Kapalıyken arayüz "Var olan proje" seçeneğini gizler, API'ler 503 döner.
  */
-export const REPO_MODE_ENABLED =
-  (process.env.REPO_MODE_ENABLED ?? "1") !== "0" &&
-  (process.env.REPO_MODE_ENABLED ?? "true").toLowerCase() !== "false";
+export const REPO_MODE_ENABLED = ["1", "true", "yes"].includes(
+  (process.env.REPO_MODE_ENABLED ?? "").trim().toLowerCase(),
+);
 
 /** Klonlanan repoların tutulduğu kök klasör (proje kökünde, .gitignore'lu). */
 export const WORKDIR_ROOT = ".rukible-workdir";

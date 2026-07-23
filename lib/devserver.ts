@@ -255,6 +255,63 @@ async function waitUntilReady(ds: DevServer): Promise<void> {
   }
 }
 
+/**
+ * Klonlanan repoya verilecek ortam değişkenleri — SADECE bu liste geçer.
+ *
+ * GÜVENLİK: burada çalışan kod GÜVENİLMEZ (kullanıcının verdiği bir repo).
+ * `{...process.env}` yayılımı bu koda Rukible'ın TÜM sırlarını miras verirdi:
+ * SUPABASE_SERVICE_KEY (RLS'i baypas eder → tüm veritabanı), OPENROUTER_API_KEY
+ * (fatura), APP_PASSWORD (araca giriş), SESSION_SECRET. Kötü niyetli bir reponun
+ * `postinstall` scriptine üç satır yazması yeterdi.
+ *
+ * Reponun kodunu çalıştırmak bu özelliğin doğası gereği kaçınılmaz; ama ona
+ * sırlarımızı vermek kaçınılabilir. Bu liste "çalışsın diye gereken" en küçük
+ * kümedir: PATH olmadan node/npm bulunamaz, HOME olmadan paket önbelleği
+ * yazılamaz.
+ */
+const ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "SHELL",
+  "USER",
+  "LOGNAME",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  "TERM",
+  "TMPDIR",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "npm_config_cache",
+  "NVM_DIR",
+  "NVM_BIN",
+] as const;
+
+function childEnv(port: number): NodeJS.ProcessEnv {
+  // NODE_ENV baştan verilir: NodeJS.ProcessEnv tipi onu zorunlu tutuyor.
+  const env: NodeJS.ProcessEnv = { NODE_ENV: "development" };
+  for (const key of ENV_ALLOWLIST) {
+    const v = process.env[key];
+    if (v !== undefined) env[key] = v;
+  }
+  return Object.assign(env, {
+    PORT: String(port),
+    // Miras alınan NODE_ENV=production, install'da devDependencies'i atlayıp
+    // `next dev`i çalışmaz hale getirir — burası her zaman geliştirme ortamı.
+    NODE_ENV: "development",
+    NEXT_TELEMETRY_DISABLED: "1",
+    BROWSER: "none",
+    CI: "1",
+    // iron-session vb. güçlü bir SESSION_SECRET bekler; yoksa render'da çöker.
+    // Rukible'ın kendi sırrı DEĞİL: önizleme başına tek kullanımlık üretilir.
+    SESSION_SECRET: randomBytes(24).toString("hex"),
+    // Önizlemeyi iframe'de gösterebilmek için: X-Frame-Options: DENY gibi
+    // framing engellerini yalnızca bu ortamda kapatmayı sağlar (uygulamanın
+    // kodu bu env'i kontrol ederse). Üretimde etkisizdir.
+    RUKIBLE_ALLOW_FRAME: "1",
+  });
+}
+
 /** Bir komutu BAĞIMSIZ (dosyaya loglayan, detached) çocuk olarak çalıştırır. */
 function spawnDetached(
   projectId: string,
@@ -328,19 +385,7 @@ export async function startDevServer(
   registry.set(projectId, ds);
 
   const pm = target.packageManager;
-  const baseEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    PORT: String(port),
-    NEXT_TELEMETRY_DISABLED: "1",
-    BROWSER: "none",
-    CI: "1",
-    // iron-session vb. güçlü bir SESSION_SECRET bekler; yoksa render'da çöker.
-    SESSION_SECRET: process.env.SESSION_SECRET || randomBytes(24).toString("hex"),
-    // Önizlemeyi iframe'de gösterebilmek için: X-Frame-Options: DENY gibi
-    // framing engellerini yalnızca bu ortamda kapatmayı sağlar (uygulamanın
-    // kodu bu env'i kontrol ederse). Üretimde etkisizdir.
-    RUKIBLE_ALLOW_FRAME: "1",
-  };
+  const baseEnv = childEnv(port);
 
   void (async () => {
     const hasModules = existsSync(path.join(cwd, "node_modules"));
