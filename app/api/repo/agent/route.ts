@@ -63,6 +63,17 @@ export async function POST(req: Request) {
     serbest: "Kullanıcının tarifine göre serbest davran; katı stil kuralı yok.",
     ruki:
       "Eğlenceli/şapşal bir dil kullan: renkli zeminler, bol emoji, oynak animasyonlar.",
+    ai:
+      "AI/derin teknoloji dili. KOYU zemin ama SAF SİYAH YASAK: derin LACİVERT/MOR " +
+      "eksende kal, derinliği katmanlı koyu tonlarla kur. TEK vurgu gradyanı seç " +
+      "(varsayılan mor→lacivert) ve sayfanın tamamında ona sadık kal. " +
+      "BÖLÜMLER ARASI KESKİN ÇİZGİ OLMASIN: bölüm zeminleri gradyanla birbirine " +
+      "aksın, arkada büyük blur'lu renk küreleri kullan — kesik kesik değil, akan " +
+      "tek parça bir sayfa. Gradyanlı ana başlık, yarı saydam cam paneller " +
+      "(blur + ince açık kenarlık), maskeli ince grid, ölçülü glow, küçük " +
+      "etiketlerde mono font. HAREKET bol ama şık: scroll-behavior:smooth, " +
+      "görünüre girdikçe yumuşak fade+kayma, hafif parallax, 200-300ms ease-out " +
+      "hover. Sürekli zıplayan öğe yok. Okunurluk her şeyden önce.",
     muhendis: "",
   };
   const styleNote = STYLE_NOTES[String(body.style ?? "")] ?? "";
@@ -96,6 +107,11 @@ export async function POST(req: Request) {
       try {
         await withRepoLock(projectId, async () => {
           let toolCalls = 0;
+          /** Kaç dosya yazıldı — hiç yazılmadıysa "tamamlandı" demek yanıltıcı olur. */
+          let yazilanDosya = 0;
+          /** "Anlatıp durma, araçları kullan" dürtmesi kaç kez yapıldı. */
+          let durtme = 0;
+          const MAX_DURTME = 2;
 
           for (let turn = 0; turn < REPO_LIMITS.maxTurns; turn++) {
             const params = {
@@ -129,7 +145,23 @@ export async function POST(req: Request) {
             conversation.push(msg as Msg);
 
             const calls = msg.tool_calls ?? [];
-            if (calls.length === 0) break; // model işini bitirdi
+            if (calls.length === 0) {
+              // Model sık sık "şimdi şunu yapıyorum" deyip araç çağırmadan
+              // duruyor. Build modunda henüz hiçbir şey yazılmadıysa bunu
+              // "iş bitti" saymak yanlış: bir kez dürtüp devam ettir.
+              if (!isPlan && yazilanDosya === 0 && durtme < MAX_DURTME) {
+                durtme++;
+                conversation.push({
+                  role: "user",
+                  content:
+                    "Anlatma, YAP. Araçları kullan: önce list_files/read_file ile " +
+                    "ilgili dosyaları incele, sonra write_file ile değişiklikleri " +
+                    "yaz. Bu turda en az bir write_file çağırmalısın.",
+                });
+                continue;
+              }
+              break; // model işini bitirdi
+            }
 
             for (const call of calls) {
               if (call.type !== "function") continue;
@@ -151,7 +183,10 @@ export async function POST(req: Request) {
               controller.enqueue(line({ t: toolLabel(fname, fargs) }));
 
               const result = await runTool(projectId, fname, fargs);
-              if (result.event) controller.enqueue(line(result.event));
+              if (result.event) {
+                if ("w" in result.event) yazilanDosya++;
+                controller.enqueue(line(result.event));
+              }
 
               conversation.push({
                 role: "tool",
@@ -159,6 +194,16 @@ export async function POST(req: Request) {
                 content: result.content,
               });
             }
+          }
+
+          // Build modunda hiç dosya yazılmadıysa bunu AÇIKÇA söyle: sessizce
+          // bitmek "yapıldı" izlenimi veriyordu.
+          if (!isPlan && yazilanDosya === 0) {
+            controller.enqueue(
+              line({
+                n: "Model hiçbir dosyayı değiştirmedi. İsteği daha somut yaz (hangi dosya/bölüm, ne değişsin) ya da tekrar dene.",
+              }),
+            );
           }
         });
       } catch (err) {

@@ -462,6 +462,7 @@ export default function RepoStudio({
     abortRef.current = controller;
 
     let assistant = "";
+    let yazilanDosya = 0;
     const stepAcc: string[] = [];
 
     try {
@@ -493,6 +494,7 @@ export default function RepoStudio({
           setSteps([...stepAcc]);
         }
         if (msg.w) {
+          yazilanDosya++;
           stepAcc.push(`✎ ${msg.w}`);
           setSteps([...stepAcc]);
         }
@@ -510,7 +512,16 @@ export default function RepoStudio({
               content: assistant.trim() || "Plan üretemedim, tekrar dener misin?",
               plan: true,
             }
-          : { role: "assistant", content: assistant.trim() || "Tamamlandı.", tone: "ok" },
+          : yazilanDosya === 0
+            ? {
+                // Hiç dosya yazılmadıysa "Tamamlandı" demek yanıltıcı.
+                role: "assistant",
+                content:
+                  assistant.trim() ||
+                  "Hiçbir dosya değişmedi. İsteği daha somut yaz (hangi dosya/bölüm, ne olsun) ya da tekrar dene.",
+                tone: "warn",
+              }
+            : { role: "assistant", content: assistant.trim() || "Tamamlandı.", tone: "ok" },
       ];
       setMessages(finalMsgs);
       setLiveText("");

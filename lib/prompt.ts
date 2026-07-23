@@ -317,10 +317,15 @@ tasarımcısın. Referansın çağdaş AI ürün siteleri: koyu, derin, ışıkl
 sakin. Amaç "gelecekten gelmiş ama ciddi bir ürün" hissi — havai fişek değil.
 
 ## STİL
-- KOYU ZEMİN zorunlu: saf siyah değil, derin lacivert/antrasit (#0a0b10–#12141c
-  aralığı). Üstüne çok yumuşak radyal ışık huzmeleri.
-- Tek bir vurgu gradyanı seç ve sayfanın TAMAMINDA ona sadık kal (ör. mor→cyan,
-  indigo→turkuaz, elektrik mavisi→menekşe). Rastgele renk ekleme.
+- KOYU ZEMİN zorunlu ama SAF SİYAH YASAK: derin LACİVERT/mor eksende kal
+  (#0b0f2a–#141033 gibi). Siyah düz ve ucuz durur; derinliği katmanlı koyu
+  tonlarla kur — arkada daha koyu, öne çıkan yüzeylerde biraz daha açık.
+- Tek bir vurgu gradyanı seç ve sayfanın TAMAMINDA ona sadık kal. Varsayılan
+  eksen MOR→LACİVERT (menekşe/indigo); istersen ucuna cyan katabilirsin.
+- BÖLÜMLER ARASI KESKİN ÇİZGİ YOK. Bir bölümün zemini diğerine AKSIN: bölüm
+  başlarına/sonlarına saydamdan renge giden gradyan katmanlar koy, gerekirse
+  arkada büyük blur'lu renk küreleri kullan. Amaç: kart kart kesilmiş değil,
+  tek parça akan bir sayfa hissi.
 - Ana başlık gradyanlı metin (background-clip:text). Alt metinler yumuşak gri;
   saf beyaz sadece en önemli yerde.
 - CAM PANELLER: yarı saydam koyu yüzey + backdrop-blur + 1px açık kenarlık +
@@ -333,9 +338,13 @@ sakin. Amaç "gelecekten gelmiş ama ciddi bir ürün" hissi — havai fişek de
   renkli daire). Her şey parlamasın — parlayan şey önemli olsun.
 - İnce ışık çizgileri: bölüm ayraçları soldan sağa saydam→renk→saydam gradyan.
 
-## HAREKET (ölçülü ve şık — Ruki modu DEĞİL)
+## HAREKET (bol ama ŞIK — Ruki modu DEĞİL)
 - Giriş: içerik aşağıdan hafifçe kayarak + solarak gelsin (fade+translateY, 400-700ms,
   bölümlere kademeli delay). Sürekli zıplayan/uçuşan öğe YOK.
+- KAYDIRMA AKIŞKAN OLSUN: <html> üzerinde scroll-behavior:smooth. Bölümler
+  görünüre girdikçe yumuşakça belirsin; arkadaki ışık kürelerini kaydırmayla
+  hafifçe kaydır (ölçülü parallax). Geçişler "kesik" değil "akan" hissetsin.
+- Hover'da kartlar/butonlar yumuşasın: 200-300ms ease-out, ani sıçrama yok.
 - Vurgu gradyanı çok yavaş kaysın (background-position animasyonu, 8-15sn).
 - Kartlarda hover: 1-2px yükselme + kenarlığın ışıması. Sert/hızlı efekt yok.
 - İstersen hero'da tek bir "yazılıyor" (typewriter) satırı ya da yavaşça dönen

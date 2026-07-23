@@ -15,16 +15,15 @@ export const MODEL = process.env.MODEL ?? "moonshotai/kimi-k3";
  * "Var olan proje" (git repo) modundaki araçlı (agentic) döngünün modeli.
  *
  * Bu döngü function-calling (tool use) kullanır — model dosyaları okuyup yazmak
- * için araç çağırır. Varsayılan: kimi-k2.7-code — kodlamaya özel, araç kullanımı
- * çalışıyor (test edildi) ve ÇOK ucuz (~$0.85/$3.8 per 1M; Claude Sonnet'in kat
- * kat altı). Değiştirmek serbest:
- *   "moonshotai/kimi-k2.7-code"    -> ucuz + kodlamaya özel (varsayılan)
- *   "moonshotai/kimi-k3"           -> senin üreteç modelin (daha pahalı)
+ * için araç çağırır. Varsayılan: kimi-k3. Ucuz olan kimi-k2.7-code araçları
+ * çağırmak yerine "şimdi şunu yapıyorum" deyip duruyordu; talimatı daha iyi
+ * izlediği için k3'e geçildi. Bedeli ~4x pahalı (~$3/$15 per 1M).
+ *   "moonshotai/kimi-k3"           -> talimatı iyi izler (varsayılan)
+ *   "moonshotai/kimi-k2.7-code"    -> çok ucuz ama araç kullanmayı atlayabiliyor
  *   "anthropic/claude-sonnet-4.5"  -> en sağlam ama pahalı
  *   "anthropic/claude-haiku-4.5"   -> ucuz Claude
  */
-export const AGENT_MODEL =
-  process.env.AGENT_MODEL ?? "moonshotai/kimi-k2.7-code";
+export const AGENT_MODEL = process.env.AGENT_MODEL ?? "moonshotai/kimi-k3";
 
 /**
  * Repo modu yereldir (disk + git gerekir) ve KLONLANAN REPONUN KODUNU ÇALIŞTIRIR.
