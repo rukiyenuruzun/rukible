@@ -40,6 +40,7 @@ Her biri için "Production", "Preview" ve "Development" kutularının üçünü 
 | Anahtar | Değer |
 |---|---|
 | `OPENROUTER_API_KEY` | OpenRouter anahtarın (`sk-or-v1-…`) |
+| `SUPABASE_URL` | Supabase proje adresin (`https://xxxx.supabase.co`) |
 | `SUPABASE_SERVICE_KEY` | Supabase service_role anahtarın |
 | `APP_PASSWORD` | **Güçlü bir şifre belirle** — araca giriş için |
 | `SESSION_SECRET` | Oturum çerezini imzalar. Üret: `openssl rand -hex 32` |

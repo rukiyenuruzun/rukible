@@ -5,19 +5,34 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
  *
  * service_role anahtarı tam yetkilidir ve RLS'i baypas eder; tarayıcıya asla
  * gönderilmemeli. Bu yüzden bu dosya yalnızca API rotalarından import edilir.
+ *
+ * ADRES SABİT KODLANMAZ. Önceden üretim projesinin adresi varsayılan değerdi;
+ * bu yüzden SUPABASE_URL'i koymayı unutan bir ortam (bir test/preview deploy'u,
+ * ya da başka birinin klonu) hata vermek yerine sessizce ÜRETİM veritabanına
+ * bağlanıyordu. Artık eksik yapılandırmada hiç bağlanmıyoruz.
  */
 
-export const SUPABASE_URL =
-  process.env.SUPABASE_URL ?? "https://wbgaumyggausjwyluecq.supabase.co";
-
 let cached: SupabaseClient | null = null;
+let warned = false;
 
 /** Yapılandırma eksikse null döner — çağıran taraf buna göre davranır. */
 export function getDb(): SupabaseClient | null {
+  const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_KEY;
-  if (!key) return null;
+  if (!url || !key) {
+    // Sessiz kalmasın: veritabanısız çalışmak geçerli bir mod ama kaza eseri
+    // olmamalı. Bir kez uyar, sonra sus (her istekte log şişirmeyelim).
+    if (!warned) {
+      warned = true;
+      console.warn(
+        `[db] ${!url ? "SUPABASE_URL" : "SUPABASE_SERVICE_KEY"} tanımlı değil — ` +
+          "veritabanı kapalı: projeler kaydedilmez, yalnızca tarayıcı hafızası kullanılır.",
+      );
+    }
+    return null;
+  }
   if (!cached) {
-    cached = createClient(SUPABASE_URL, key, {
+    cached = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
   }

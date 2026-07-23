@@ -8,7 +8,7 @@ export async function POST(req: Request) {
   const db = getDb();
   if (!db) {
     return new Response(
-      "Supabase yapılandırılmamış. .env.local dosyasına SUPABASE_SERVICE_KEY ekle.",
+      "Supabase yapılandırılmamış. .env.local dosyasına SUPABASE_URL ve SUPABASE_SERVICE_KEY ekle.",
       { status: 503 },
     );
   }

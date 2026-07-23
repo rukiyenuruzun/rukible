@@ -1,7 +1,7 @@
 import { getDb } from "@/lib/db";
 
 const NOT_CONFIGURED =
-  "Supabase yapılandırılmamış. .env.local dosyasına SUPABASE_SERVICE_KEY ekle.";
+  "Supabase yapılandırılmamış. .env.local dosyasına SUPABASE_URL ve SUPABASE_SERVICE_KEY ekle.";
 
 /** Projeleri listeler (en son güncellenen üstte). */
 export async function GET() {

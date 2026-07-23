@@ -1,7 +1,7 @@
 -- Rukible veritabanı şeması
 --
 -- Supabase panelinde SQL Editor'ü aç, bu dosyanın tamamını yapıştır ve çalıştır.
--- https://supabase.com/dashboard/project/wbgaumyggausjwyluecq/sql/new
+-- https://supabase.com/dashboard  →  projen  →  SQL Editor  →  New query
 
 -- Bir proje = üzerinde çalıştığın bir sayfa ("Kampanya sayfası" gibi).
 create table if not exists projects (
