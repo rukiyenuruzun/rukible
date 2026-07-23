@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
-import { COOKIE_NAME, tokenFor, safeEqual } from "@/lib/auth";
+import {
+  COOKIE_NAME,
+  SESSION_TTL_MS,
+  issueSession,
+  passwordMatches,
+} from "@/lib/auth";
 
 const COOKIE_OPTIONS = {
   path: "/",
   httpOnly: true,
   sameSite: "lax" as const,
-  maxAge: 60 * 60 * 24 * 30, // 30 gün
+  // Çerezin ömrü jetonun ömrüyle aynı: tarayıcı, sunucunun zaten kabul
+  // etmeyeceği bir jetonu taşımasın.
+  maxAge: Math.floor(SESSION_TTL_MS / 1000),
   secure: process.env.NODE_ENV === "production",
 };
 
@@ -21,14 +28,18 @@ const COOKIE_OPTIONS = {
  */
 export async function POST(req: Request) {
   const password = process.env.APP_PASSWORD;
+  const secret = process.env.SESSION_SECRET;
   const contentType = req.headers.get("content-type") ?? "";
   const isForm =
     contentType.includes("form-urlencoded") || contentType.includes("form-data");
 
-  if (!password) {
+  if (!password || !secret) {
     return isForm
       ? NextResponse.redirect(new URL("/giris?hata=kurulum", req.url), 303)
-      : new Response("APP_PASSWORD tanımlı değil.", { status: 503 });
+      : new Response(
+          `${!password ? "APP_PASSWORD" : "SESSION_SECRET"} tanımlı değil.`,
+          { status: 503 },
+        );
   }
 
   let attempt = "";
@@ -40,10 +51,7 @@ export async function POST(req: Request) {
     attempt = typeof body?.password === "string" ? body.password : "";
   }
 
-  const expected = await tokenFor(password);
-  const given = await tokenFor(attempt);
-
-  if (!safeEqual(given, expected)) {
+  if (!(await passwordMatches(attempt, password))) {
     // Kaba kuvvet denemelerini yavaşlatmak için küçük bir gecikme.
     await new Promise((r) => setTimeout(r, 600));
     return isForm
@@ -55,7 +63,9 @@ export async function POST(req: Request) {
     ? NextResponse.redirect(new URL("/basla", req.url), 303)
     : NextResponse.json({ ok: true });
 
-  response.cookies.set(COOKIE_NAME, expected, COOKIE_OPTIONS);
+  // Çereze şifreden türetilen bir şey DEĞİL, süreli ve imzalı bir oturum
+  // jetonu yazılır (bkz. lib/auth.ts).
+  response.cookies.set(COOKIE_NAME, await issueSession(secret), COOKIE_OPTIONS);
   return response;
 }
 

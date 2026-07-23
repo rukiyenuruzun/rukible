@@ -23,7 +23,7 @@ export default async function Giris({
     hata === "sifre"
       ? "Şifre yanlış."
       : hata === "kurulum"
-        ? "Sunucuda APP_PASSWORD tanımlı değil."
+        ? "Sunucu kurulumu eksik: APP_PASSWORD ve SESSION_SECRET tanımlı olmalı."
         : "";
 
   return (

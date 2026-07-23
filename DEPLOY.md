@@ -42,11 +42,16 @@ Her biri için "Production", "Preview" ve "Development" kutularının üçünü 
 | `OPENROUTER_API_KEY` | OpenRouter anahtarın (`sk-or-v1-…`) |
 | `SUPABASE_SERVICE_KEY` | Supabase service_role anahtarın |
 | `APP_PASSWORD` | **Güçlü bir şifre belirle** — araca giriş için |
+| `SESSION_SECRET` | Oturum çerezini imzalar. Üret: `openssl rand -hex 32` |
 
 İsteğe bağlı: `MODEL` (varsayılan `moonshotai/kimi-k3`).
 
-> `APP_PASSWORD` tanımlı değilse araç bilerek açılmaz. Bu, "şifre koymayı
-> unutup interneti açık bırakma" ihtimalini ortadan kaldırmak için.
+> `APP_PASSWORD` ya da `SESSION_SECRET` tanımlı değilse araç bilerek açılmaz.
+> Bu, "şifre koymayı unutup interneti açık bırakma" ihtimalini ortadan
+> kaldırmak için.
+>
+> `SESSION_SECRET`'i değiştirmek tüm oturumları anında geçersiz kılar — çerezi
+> çalınan biri olursa acil "herkesi çıkart" düğmen budur.
 
 ### 4. Canlıya al
 

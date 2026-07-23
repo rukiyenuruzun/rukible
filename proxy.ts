@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { COOKIE_NAME, tokenFor, safeEqual } from "@/lib/auth";
+import { COOKIE_NAME, verifySession } from "@/lib/auth";
 
 /**
  * Şifre kapısı. Aracın tamamını korur.
@@ -13,17 +13,19 @@ import { COOKIE_NAME, tokenFor, safeEqual } from "@/lib/auth";
  */
 export async function proxy(request: NextRequest) {
   const password = process.env.APP_PASSWORD;
+  const secret = process.env.SESSION_SECRET;
 
-  if (!password) {
+  if (!password || !secret) {
+    const eksik = !password ? "APP_PASSWORD" : "SESSION_SECRET";
     return new NextResponse(
-      "APP_PASSWORD tanımlı değil. Araç güvenlik gereği kapalı. " +
-        ".env.local dosyasına (ve Vercel'de ortam değişkenlerine) bir şifre ekle.",
+      `${eksik} tanımlı değil. Araç güvenlik gereği kapalı. ` +
+        ".env.local dosyasına (ve Vercel'de ortam değişkenlerine) ekle. " +
+        "SESSION_SECRET için rastgele uzun bir değer üret: openssl rand -hex 32",
       { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } },
     );
   }
 
-  const cookie = request.cookies.get(COOKIE_NAME)?.value;
-  if (cookie && safeEqual(cookie, await tokenFor(password))) {
+  if (await verifySession(request.cookies.get(COOKIE_NAME)?.value, secret)) {
     return NextResponse.next();
   }
 
