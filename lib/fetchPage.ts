@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { assertPublicUrl, safeFetchText } from "@/lib/ssrf";
 
 /**
  * Verilen URL'deki sayfayı çeker ve modele verilebilecek özet bir profil çıkarır.
@@ -22,37 +23,18 @@ export function extractUrls(text: string): string[] {
   return [...new Set(matches)];
 }
 
-/** Yerel ağ / iç servis adreslerine istek atılmasını engeller. */
-function isBlockedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  return (
-    h === "localhost" ||
-    h.endsWith(".local") ||
-    h.endsWith(".internal") ||
-    /^127\./.test(h) ||
-    /^10\./.test(h) ||
-    /^192\.168\./.test(h) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
-    /^169\.254\./.test(h) ||
-    h === "0.0.0.0" ||
-    h === "[::1]"
-  );
-}
-
+/**
+ * Getirme her zaman SSRF süzgecinden geçer (bkz. lib/ssrf.ts): host adı
+ * çözülüp tüm IP'ler kontrol edilir ve yönlendirmeler adım adım yeniden
+ * doğrulanır. Bu fonksiyon hem ana sayfa hem de sayfadaki stylesheet'ler için
+ * kullanılır — alt kaynaklar da aynı korumaya tabi.
+ */
 async function get(url: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": UA, Accept: "text/html,text/css,*/*" },
-      signal: controller.signal,
-      redirect: "follow",
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
-  } finally {
-    clearTimeout(timer);
-  }
+  return safeFetchText(
+    url,
+    { headers: { "User-Agent": UA, Accept: "text/html,text/css,*/*" } },
+    { timeoutMs },
+  );
 }
 
 /** CSS metninden renk ve font sinyallerini çıkarır. */
@@ -112,19 +94,10 @@ export type PageProfile = {
 };
 
 export async function fetchPageProfile(rawUrl: string): Promise<PageProfile> {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    return { url: rawUrl, ok: false, error: "Geçersiz URL" };
-  }
-
-  if (!/^https?:$/.test(parsed.protocol)) {
-    return { url: rawUrl, ok: false, error: "Sadece http/https destekleniyor" };
-  }
-  if (isBlockedHost(parsed.hostname)) {
-    return { url: rawUrl, ok: false, error: "Bu adrese erişim engelli" };
-  }
+  // Şema/kimlik/host + çözülmüş IP kontrolü tek yerde.
+  const check = await assertPublicUrl(rawUrl);
+  if (!check.ok) return { url: rawUrl, ok: false, error: check.error };
+  const parsed = check.url;
 
   let html: string;
   try {

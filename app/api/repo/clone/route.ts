@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     return new Response("Geçersiz istek gövdesi.", { status: 400 });
   }
 
-  const check = validateGitUrl(body.url ?? "");
+  const check = await validateGitUrl(body.url ?? "");
   if (!check.ok) return new Response(check.error, { status: 400 });
 
   // Proje kimliği: verildiyse doğrula, yoksa DB'de aç ya da üret.

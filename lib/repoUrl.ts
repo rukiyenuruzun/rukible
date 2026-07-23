@@ -6,27 +6,11 @@
  * yerel servislere/dosya sistemine erişim (SSRF) engellenir.
  */
 
+import { assertPublicUrl } from "@/lib/ssrf";
+
 export type RepoUrlResult =
   | { ok: true; url: string; name: string }
   | { ok: false; error: string };
-
-/** Yerel ağ / iç servis adreslerini engeller (fetchPage.isBlockedHost ile aynı ruh). */
-function isBlockedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  return (
-    h === "localhost" ||
-    h.endsWith(".local") ||
-    h.endsWith(".internal") ||
-    /^127\./.test(h) ||
-    /^10\./.test(h) ||
-    /^192\.168\./.test(h) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
-    /^169\.254\./.test(h) ||
-    h === "0.0.0.0" ||
-    h === "::1" ||
-    h === ""
-  );
-}
 
 /** Repo adını URL'nin son parçasından çıkarır ("owner/x.git" -> "x"). */
 function repoNameFromUrl(u: URL): string {
@@ -34,7 +18,7 @@ function repoNameFromUrl(u: URL): string {
   return last.replace(/\.git$/i, "").slice(0, 80) || "proje";
 }
 
-export function validateGitUrl(raw: string): RepoUrlResult {
+export async function validateGitUrl(raw: string): Promise<RepoUrlResult> {
   const trimmed = (raw ?? "").trim();
   if (!trimmed) return { ok: false, error: "URL boş." };
 
@@ -46,25 +30,21 @@ export function validateGitUrl(raw: string): RepoUrlResult {
     };
   }
 
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    return { ok: false, error: "Geçersiz URL." };
-  }
-
-  if (!/^https?:$/.test(parsed.protocol)) {
+  if (!/^https?:\/\//i.test(trimmed)) {
     return {
       ok: false,
       error: "Sadece http/https destekleniyor (git://, ssh://, file:// değil).",
     };
   }
-  if (parsed.username || parsed.password) {
-    return { ok: false, error: "Kimlik içeren URL kabul edilmiyor (public repo ver)." };
+
+  // Şema, kimlik, host adı ve ÇÖZÜLMÜŞ TÜM IP'ler tek yerden kontrol edilir.
+  // Not: `git clone` adresi kendisi tekrar çözer; bu kontrol iç adresleri
+  // eler ama teorik bir DNS rebinding aralığı kalır (bkz. lib/ssrf.ts).
+  const check = await assertPublicUrl(trimmed);
+  if (!check.ok) {
+    return { ok: false, error: `${check.error} (public bir repo adresi ver).` };
   }
-  if (isBlockedHost(parsed.hostname)) {
-    return { ok: false, error: "Bu adrese erişim engelli." };
-  }
+  const parsed = check.url;
 
   // Temiz URL'yi yeniden kur (fragment/gereksiz kısımları at).
   const clean = `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}`;
