@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { getDb, dbError } from "@/lib/db";
 
 const NOT_CONFIGURED =
   "Supabase yapılandırılmamış. .env.local dosyasına SUPABASE_URL ve SUPABASE_SERVICE_KEY ekle.";
@@ -14,7 +14,7 @@ export async function GET() {
     .order("updated_at", { ascending: false })
     .limit(50);
 
-  if (error) return new Response(error.message, { status: 500 });
+  if (error) return dbError("projects.list", error, "Projeler getirilemedi.");
   return Response.json({ projects: data ?? [] });
 }
 
@@ -45,6 +45,6 @@ export async function POST(req: Request) {
     .select("id, title, kind, repo_url, created_at, updated_at")
     .single();
 
-  if (error) return new Response(error.message, { status: 500 });
+  if (error) return dbError("projects.insert", error, "Proje oluşturulamadı.");
   return Response.json({ project: data });
 }

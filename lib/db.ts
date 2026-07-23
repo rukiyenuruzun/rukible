@@ -39,6 +39,23 @@ export function getDb(): SupabaseClient | null {
   return cached;
 }
 
+/**
+ * Veritabanı hatasını SUNUCUYA loglar, istemciye GENEL bir mesaj döner.
+ *
+ * Supabase'in ham `error.message`'ı tablo/sütun/kısıt adlarını ve bazen sorgu
+ * parçalarını içerir; bunu istemciye vermek saldırgana şemanın haritasını
+ * çizdirmek demek. Detay log'da kalsın, kullanıcı sade bir mesaj görsün.
+ */
+export function dbError(
+  yer: string,
+  error: unknown,
+  mesaj = "İşlem tamamlanamadı.",
+  status = 500,
+): Response {
+  console.error(`[db] ${yer}:`, error);
+  return new Response(mesaj, { status });
+}
+
 export type Project = {
   id: string;
   title: string;

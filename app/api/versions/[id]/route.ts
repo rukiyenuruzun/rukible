@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { getDb, dbError } from "@/lib/db";
 
 /**
  * Tek bir versiyonu siler.
@@ -14,6 +14,6 @@ export async function DELETE(
   const { id } = await params;
   const { error } = await db.from("versions").delete().eq("id", id);
 
-  if (error) return new Response(error.message, { status: 500 });
+  if (error) return dbError("versions.get", error, "Versiyon getirilemedi.");
   return Response.json({ ok: true });
 }

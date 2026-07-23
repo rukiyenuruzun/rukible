@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { getDb, dbError } from "@/lib/db";
 
 /** Yeni bir versiyon kaydeder (her üretim ve her düzenleme sonrası). */
 export async function POST(req: Request) {
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     .select("id, project_id, prompt, cost, share_slug, created_at")
     .single();
 
-  if (error) return new Response(error.message, { status: 500 });
+  if (error) return dbError("versions.insert", error, "Versiyon kaydedilemedi.");
 
   // Proje listesinde en son çalışılan üstte görünsün.
   await db

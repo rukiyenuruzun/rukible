@@ -1,4 +1,4 @@
-import { getDb, makeSlug } from "@/lib/db";
+import { getDb, makeSlug, dbError } from "@/lib/db";
 
 /**
  * Bir versiyonu herkese açık hale getirir ve paylaşılabilir bir kod üretir.
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     .update({ share_slug: slug })
     .eq("id", body.versionId);
 
-  if (error) return new Response(error.message, { status: 500 });
+  if (error) return dbError("share.create", error, "Paylaşım linki oluşturulamadı.");
   return Response.json({ slug, reused: false });
 }
 
@@ -50,6 +50,6 @@ export async function DELETE(req: Request) {
     .update({ share_slug: null })
     .eq("id", body.versionId);
 
-  if (error) return new Response(error.message, { status: 500 });
+  if (error) return dbError("share.revoke", error, "Paylaşım kaldırılamadı.");
   return Response.json({ ok: true });
 }

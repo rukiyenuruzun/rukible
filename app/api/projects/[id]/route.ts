@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { getDb, dbError } from "@/lib/db";
 
 /** Bir projeyi tüm versiyonlarıyla getirir (geri alma listesi için). */
 export async function GET(
@@ -23,7 +23,7 @@ export async function GET(
     .eq("id", id)
     .single();
 
-  if (projectError) return new Response(projectError.message, { status: 404 });
+  if (projectError) return dbError("projects.get", projectError, "Proje bulunamadı.", 404);
 
   const { data: versions, error: versionsError } = await db
     .from("versions")
@@ -32,7 +32,7 @@ export async function GET(
     .order("created_at", { ascending: false })
     .limit(100);
 
-  if (versionsError) return new Response(versionsError.message, { status: 500 });
+  if (versionsError) return dbError("versions.list", versionsError, "Versiyonlar getirilemedi.");
 
   return Response.json({ project, versions: versions ?? [] });
 }
@@ -52,7 +52,7 @@ export async function DELETE(
   const { id } = await params;
   const { error } = await db.from("projects").delete().eq("id", id);
 
-  if (error) return new Response(error.message, { status: 500 });
+  if (error) return dbError("projects.delete", error, "Proje silinemedi.");
   return Response.json({ ok: true });
 }
 
@@ -83,6 +83,6 @@ export async function POST(
     .update({ title, updated_at: new Date().toISOString() })
     .eq("id", id);
 
-  if (error) return new Response(error.message, { status: 500 });
+  if (error) return dbError("projects.rename", error, "Başlık kaydedilemedi.");
   return Response.json({ ok: true });
 }

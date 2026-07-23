@@ -19,6 +19,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+/** Mesajdaki mutlak dosya yollarını maskeler (sunucu yapısı istemciye sızmasın). */
+function redactPaths(text: string): string {
+  return text.replace(/\/(?:home|Users|root|tmp|var|opt|srv)\/[^\s'")\]]*/g, "<yol>");
+}
+
 /** Ağaçtan mantıklı bir açılış dosyası seç (kökte index.html öncelikli). */
 function pickDefaultFile(tree: TreeEntry[]): string | undefined {
   const files = tree.filter((e) => e.type === "file").map((e) => e.path);
@@ -127,8 +132,15 @@ export async function POST(req: Request) {
       return new Response(err.message, { status: 413 });
     }
     const e = err as NodeJS.ErrnoException & { stderr?: string };
-    const detail = (e.stderr || e.message || "bilinmeyen hata").trim().slice(0, 500);
-    return new Response(`Klonlama başarısız: ${detail}`, { status: 502 });
+    const raw = (e.stderr || e.message || "bilinmeyen hata").trim();
+    // Tam metin sunucuda kalır; istemciye giden kopyadan yerel dosya yolları
+    // temizlenir ("destination path '/home/odoo/.rukible-workdir/...'" gibi).
+    // git'in kendi açıklaması (repo yok / erişim reddedildi) korunur, çünkü
+    // kullanıcının sorunu çözmesi için gereken asıl bilgi odur.
+    console.error("[repo.clone] başarısız:", raw);
+    return new Response(`Klonlama başarısız: ${redactPaths(raw).slice(0, 300)}`, {
+      status: 502,
+    });
   }
 }
 
