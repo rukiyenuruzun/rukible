@@ -90,6 +90,9 @@ export default function RepoStudio({
     "idle" | "installing" | "starting" | "ready" | "error" | "stopped"
   >("idle");
   const [devPort, setDevPort] = useState<number | null>(null);
+  // Önizleme iframe'inin bağlandığı port (dev sunucusunun önündeki çerçeve
+  // proxy'si — Firefox'taki sonsuz yenilenme döngüsünü önler).
+  const [framePort, setFramePort] = useState<number | null>(null);
   const [devLogs, setDevLogs] = useState<string[]>([]);
   const [devError, setDevError] = useState("");
   const devPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -161,6 +164,7 @@ export default function RepoStudio({
         const d = await res.json();
         setDevStatus(d.status);
         if (d.port) setDevPort(d.port);
+        if (d.framePort) setFramePort(d.framePort);
         if (Array.isArray(d.logs)) setDevLogs(d.logs);
         if (d.error) setDevError(d.error);
         if (d.status === "ready" || d.status === "error" || d.status === "stopped") {
@@ -204,6 +208,7 @@ export default function RepoStudio({
         clearDevPoll();
         setDevStatus("idle");
         setDevPort(null);
+        setFramePort(null);
         setDevLogs([]);
         setProjectId(id);
         setTitle(proj.title ?? "Proje");
@@ -226,6 +231,7 @@ export default function RepoStudio({
           if (dev && dev.status === "ready" && dev.port) {
             setDevStatus("ready");
             setDevPort(dev.port);
+            if (dev.framePort) setFramePort(dev.framePort);
           }
         } catch {
           // yoksay
@@ -275,6 +281,7 @@ export default function RepoStudio({
       clearDevPoll();
       setDevStatus("idle");
       setDevPort(null);
+      setFramePort(null);
       setDevLogs([]);
       setProjectId(data.projectId);
       setRepoUrl(url);
@@ -341,6 +348,7 @@ export default function RepoStudio({
       const d = await res.json();
       setDevStatus(d.status);
       if (d.port) setDevPort(d.port);
+      if (d.framePort) setFramePort(d.framePort);
       clearDevPoll();
       devPollRef.current = setInterval(() => pollDev(projectId), 2000);
     } catch (e) {
@@ -358,6 +366,7 @@ export default function RepoStudio({
     }
     setDevStatus("idle");
     setDevPort(null);
+    setFramePort(null);
     setDevLogs([]);
     setDevError("");
   }
@@ -616,17 +625,20 @@ export default function RepoStudio({
   const selectedChange = changes[selected];
   const devFw = detectFramework(tree);
   // Önizleme kaynağı:
-  //  - LOKAL erişimde (localhost) DOĞRUDAN dev sunucusuna bağlanır → uygulama
-  //    native çalışır: HMR, hydration ve mouse/animasyon etkileşimleri tam
-  //    çalışır (proxy araya girmez).
+  //  - LOKAL erişimde (localhost) ÇERÇEVE PROXY'sine bağlanır: dev sunucusunu
+  //    birebir aynı yollarla sunar → uygulama native çalışır (HMR, hydration,
+  //    mouse/animasyon etkileşimleri tam), üstüne `Timing-Allow-Origin` ekler.
+  //    Bu başlık olmadan Firefox iframe'de sonsuz yenilenme döngüsüne giriyor
+  //    (bkz. lib/devserver.ts → startFrameProxy). Proxy yoksa dev portuna düşer.
   //  - Uzak/tünel erişiminde Rukible origin'i üzerinden proxy'lenir (tek adres,
   //    ayrı port yönlendirmesi gerekmez) — görsel önizleme.
   const isLocalHost =
     typeof window !== "undefined" &&
     /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+  const localPort = framePort ?? devPort;
   const previewSrc = projectId
-    ? isLocalHost && devPort
-      ? `http://localhost:${devPort}`
+    ? isLocalHost && localPort
+      ? `http://localhost:${localPort}`
       : `/api/repo/live/${projectId}`
     : "";
 
@@ -657,6 +669,7 @@ export default function RepoStudio({
                 clearDevPoll();
                 setDevStatus("idle");
                 setDevPort(null);
+                setFramePort(null);
                 setProjectId(null);
                 setMessages([]);
                 loadProjects();

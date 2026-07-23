@@ -1,6 +1,11 @@
 import { isValidProjectId, workdirExists } from "@/lib/workspace";
 import { detectFrontend } from "@/lib/detectFrontend";
-import { startDevServer, getDevServer, stopDevServer } from "@/lib/devserver";
+import {
+  startDevServer,
+  getDevServer,
+  stopDevServer,
+  ensureFramePort,
+} from "@/lib/devserver";
 import { REPO_MODE_ENABLED } from "@/lib/config";
 
 export const runtime = "nodejs";
@@ -44,6 +49,7 @@ export async function POST(req: Request) {
   return Response.json({
     status: ds.status,
     port: ds.port,
+    framePort: ds.framePort,
     subdir: ds.subdir,
     framework: ds.framework,
     packageManager: ds.packageManager,
@@ -58,9 +64,12 @@ export async function GET(req: Request) {
   }
   const ds = getDevServer(projectId);
   if (!ds) return Response.json({ status: "stopped", logs: [] });
+  // Rukible süreci yeniden başladıysa çerçeve proxy'si kaybolmuş olabilir.
+  const framePort = ds.status === "ready" ? await ensureFramePort(projectId) : ds.framePort;
   return Response.json({
     status: ds.status,
     port: ds.port,
+    framePort,
     subdir: ds.subdir,
     framework: ds.framework,
     error: ds.error,

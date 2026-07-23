@@ -1,5 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, openSync, closeSync, readFileSync, writeSync } from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 import path from "node:path";
 import os from "node:os";
 import { randomBytes } from "node:crypto";
@@ -35,10 +38,18 @@ export type DevServer = {
   error?: string;
   proc: ChildProcess | null;
   startedAt: number;
+  /** iframe'in bağlandığı çerçeve proxy portu (bkz. startFrameProxy). */
+  framePort?: number;
 };
 
-const g = globalThis as unknown as { __rukibleDev?: Map<string, DevServer> };
+type FrameProxy = { server: http.Server; port: number };
+
+const g = globalThis as unknown as {
+  __rukibleDev?: Map<string, DevServer>;
+  __rukibleFrame?: Map<string, FrameProxy>;
+};
 const registry: Map<string, DevServer> = (g.__rukibleDev ??= new Map());
+const frames: Map<string, FrameProxy> = (g.__rukibleFrame ??= new Map());
 
 const READY_TIMEOUT_MS = 180_000;
 
@@ -95,6 +106,136 @@ async function probe(port: number): Promise<boolean> {
   }
 }
 
+/**
+ * ÇERÇEVE (iframe) PROXY'Sİ
+ *
+ * Dev sunucusunu BİREBİR (aynı yollarla, yeniden yazma olmadan) ikinci bir
+ * porttan sunar; sadece yanıt başlıklarına dokunur.
+ *
+ * NEDEN GEREKLİ — Firefox'ta sonsuz yenilenme döngüsü:
+ *  Firefox, ÇAPRAZ-ORIGIN bir iframe'de `PerformanceNavigationTiming.transferSize`
+ *  değerini 0 raporluyor. Next 16'nın dev istemcisi (`client/dev/debug-channel.js`)
+ *  bunu "sayfa HTTP önbelleğinden geldi" sanıp sessionStorage'daki debug kanalını
+ *  arıyor; bulamayınca `location.reload()` çağırıyor → sayfa baştan yükleniyor →
+ *  aynı şey tekrar → saniyede birkaç kez yenilenen, hiç oturmayan bir önizleme
+ *  (uçuştaki chunk istekleri de iptal olduğu için ChunkLoadError'lar).
+ *  `Timing-Allow-Origin: *` transferSize'ı çapraz-origin'e görünür kılıyor ve
+ *  döngü tamamen bitiyor (ölçüldü: 20 yükleme/15sn → 1 yükleme).
+ *
+ * Yollar değişmediği için uygulama "native" çalışır: HMR web soketi (upgrade
+ * aktarılıyor), hydration ve fare/animasyon etkileşimleri tam.
+ * Ek olarak framing engelleri (X-Frame-Options / CSP frame-ancestors) sıyrılır.
+ */
+function startFrameProxy(projectId: string, devPort: number): Promise<number> {
+  const existing = frames.get(projectId);
+  if (existing) return Promise.resolve(existing.port);
+
+  const rewriteLocation = (loc: string, framePort: number): string =>
+    loc.replace(
+      new RegExp(`^(https?://)(127\\.0\\.0\\.1|localhost):${devPort}`, "i"),
+      `$1localhost:${framePort}`,
+    );
+
+  const server = http.createServer((req, res) => {
+    const upstream = http.request(
+      { host: "127.0.0.1", port: devPort, path: req.url, method: req.method, headers: req.headers },
+      (up) => {
+        const headers: http.OutgoingHttpHeaders = { ...up.headers };
+        delete headers["x-frame-options"];
+        delete headers["content-security-policy"];
+        delete headers["content-security-policy-report-only"];
+        headers["timing-allow-origin"] = "*";
+        const loc = headers["location"];
+        const port = (server.address() as AddressInfo | null)?.port;
+        if (typeof loc === "string" && port) headers["location"] = rewriteLocation(loc, port);
+        res.writeHead(up.statusCode ?? 502, headers);
+        up.pipe(res);
+      },
+    );
+    upstream.on("error", () => {
+      if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+      res.end("Önizleme sunucusuna ulaşılamadı.");
+    });
+    req.pipe(upstream);
+  });
+
+  // HMR web soketi (ve diğer upgrade'ler) ham olarak aktarılır.
+  server.on("upgrade", (req, socket: Duplex, head: Buffer) => {
+    const upstream = http.request({
+      host: "127.0.0.1",
+      port: devPort,
+      path: req.url,
+      method: req.method,
+      headers: req.headers,
+    });
+    upstream.on("upgrade", (up, upSocket, upHead) => {
+      const lines = [`HTTP/1.1 ${up.statusCode} ${up.statusMessage}`];
+      for (let i = 0; i < up.rawHeaders.length; i += 2) {
+        lines.push(`${up.rawHeaders[i]}: ${up.rawHeaders[i + 1]}`);
+      }
+      socket.write(lines.join("\r\n") + "\r\n\r\n");
+      if (upHead?.length) socket.write(upHead);
+      upSocket.pipe(socket);
+      socket.pipe(upSocket);
+      upSocket.on("error", () => socket.destroy());
+      socket.on("error", () => upSocket.destroy());
+    });
+    upstream.on("error", () => socket.destroy());
+    if (head?.length) upstream.write(head);
+    upstream.end();
+  });
+
+  server.on("clientError", (_e, socket) => socket.destroy());
+
+  // Tercihen dev portunun bir fazlası; doluysa serbest bir port.
+  const preferred = devPort + 1;
+  return new Promise<number>((resolve, reject) => {
+    const settle = () => {
+      const port = (server.address() as AddressInfo).port;
+      frames.set(projectId, { server, port });
+      appendLog(projectId, `✓ çerçeve proxy'si hazır: http://localhost:${port}`);
+      resolve(port);
+    };
+    const onError = (e: NodeJS.ErrnoException) => {
+      if (e.code !== "EADDRINUSE") return reject(e);
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", settle);
+    };
+    server.once("error", onError);
+    server.listen(preferred, "127.0.0.1", () => {
+      server.removeListener("error", onError);
+      settle();
+    });
+  });
+}
+
+function stopFrameProxy(projectId: string): void {
+  const f = frames.get(projectId);
+  if (!f) return;
+  frames.delete(projectId);
+  try {
+    f.server.closeAllConnections?.();
+    f.server.close();
+  } catch {
+    // yoksay
+  }
+}
+
+/**
+ * Dev sunucusu hazırsa çerçeve proxy'sinin ayakta olduğundan emin olur.
+ * (Rukible süreci yeniden başladıysa proxy kaybolmuş olabilir.)
+ */
+export async function ensureFramePort(projectId: string): Promise<number | undefined> {
+  const ds = registry.get(projectId);
+  if (!ds || ds.status !== "ready") return undefined;
+  try {
+    ds.framePort = await startFrameProxy(projectId, ds.port);
+    return ds.framePort;
+  } catch {
+    return undefined;
+  }
+}
+
 async function waitUntilReady(ds: DevServer): Promise<void> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -102,6 +243,7 @@ async function waitUntilReady(ds: DevServer): Promise<void> {
     if (await probe(ds.port)) {
       ds.status = "ready";
       appendLog(ds.projectId, `✓ dev sunucusu hazır: http://localhost:${ds.port}`);
+      ds.framePort = await startFrameProxy(ds.projectId, ds.port).catch(() => undefined);
       return;
     }
     await new Promise((r) => setTimeout(r, 1500));
@@ -167,6 +309,7 @@ export async function startDevServer(
       startedAt: existing?.startedAt ?? Date.now(),
     };
     registry.set(projectId, ds);
+    ds.framePort = await startFrameProxy(projectId, port).catch(() => undefined);
     return ds;
   }
 
@@ -243,6 +386,7 @@ export function getDevServer(
 export function stopDevServer(projectId: string): boolean {
   const ds = registry.get(projectId);
   const port = stablePort(projectId);
+  stopFrameProxy(projectId);
   let killed = false;
   const proc = ds?.proc;
   if (proc && proc.pid) {
