@@ -13,14 +13,19 @@ import { COOKIE_NAME, verifySession } from "@/lib/auth";
  */
 export async function proxy(request: NextRequest) {
   const password = process.env.APP_PASSWORD;
-  const secret = process.env.SESSION_SECRET;
 
-  if (!password || !secret) {
-    const eksik = !password ? "APP_PASSWORD" : "SESSION_SECRET";
+  // ŞİFRE KAPISI İSTEĞE BAĞLI.
+  // APP_PASSWORD tanımlı değilse kapı yoktur: araç doğrudan açılır. Yerel,
+  // tek kullanıcılı kullanım için istenen davranış bu.
+  // İNTERNETE AÇIK BİR YERE KURARKEN MUTLAKA TANIMLA — yoksa üretim uçları
+  // (OpenRouter bakiyesi, veritabanı) herkese açık olur.
+  if (!password) return NextResponse.next();
+
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
     return new NextResponse(
-      `${eksik} tanımlı değil. Araç güvenlik gereği kapalı. ` +
-        ".env.local dosyasına (ve Vercel'de ortam değişkenlerine) ekle. " +
-        "SESSION_SECRET için rastgele uzun bir değer üret: openssl rand -hex 32",
+      "APP_PASSWORD tanımlı ama SESSION_SECRET yok; oturum çerezi imzalanamıyor. " +
+        "Rastgele uzun bir değer üret: openssl rand -hex 32",
       { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } },
     );
   }

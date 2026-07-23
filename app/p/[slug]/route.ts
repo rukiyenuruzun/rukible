@@ -40,6 +40,11 @@ export async function GET(
       // Paylaşılan tasarım arama motorlarına düşmesin.
       "X-Robots-Tag": "noindex, nofollow",
       "Cache-Control": "public, max-age=60",
+      // Üretilen HTML güvenilmez: sandbox sayfayı opak origin'e alır,
+      // script'ler çalışmaya devam eder ama /api/* ve çerezlere
+      // same-origin erişimi kalmaz. allow-same-origin ASLA eklenmemeli.
+      "Content-Security-Policy":
+        "sandbox allow-scripts allow-forms allow-popups",
     },
   });
 }

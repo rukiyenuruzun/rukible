@@ -80,7 +80,16 @@ export default function RepoStudio({
   const [mode, setMode] = useState<"build" | "plan">("build");
   const [cost, setCost] = useState(0);
 
-  const [tab, setTab] = useState<"preview" | "changes">("preview");
+  const [tab, setTab] = useState<"preview" | "changes" | "files">("preview");
+
+  // Elle dosya düzenleme
+  const [editPath, setEditPath] = useState("");
+  const [editContent, setEditContent] = useState("");
+  /** Diskten okunan hali — "kaydedilmemiş değişiklik var mı" bunun farkı. */
+  const [editOriginal, setEditOriginal] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [fileFilter, setFileFilter] = useState("");
   const [previewPath, setPreviewPath] = useState("");
   const [tree, setTree] = useState<TreeEntry[]>([]);
   const [previewKey, setPreviewKey] = useState(0);
@@ -210,6 +219,7 @@ export default function RepoStudio({
         setDevPort(null);
         setFramePort(null);
         setDevLogs([]);
+        resetEditor();
         setProjectId(id);
         setTitle(proj.title ?? "Proje");
         setRepoUrl(url);
@@ -283,6 +293,7 @@ export default function RepoStudio({
       setDevPort(null);
       setFramePort(null);
       setDevLogs([]);
+      resetEditor();
       setProjectId(data.projectId);
       setRepoUrl(url);
       setTree(data.tree ?? []);
@@ -317,6 +328,7 @@ export default function RepoStudio({
         const data = await res.json();
         setPreviewPath(data.defaultFile ?? "");
         setPreviewKey((k) => k + 1);
+        resetEditor();
         await refreshChanges(projectId);
       }
     } finally {
@@ -369,6 +381,70 @@ export default function RepoStudio({
     setFramePort(null);
     setDevLogs([]);
     setDevError("");
+  }
+
+  /** Proje/çalışma kopyası değişince açık dosyayı bırak (içerik artık geçersiz). */
+  function resetEditor() {
+    setEditPath("");
+    setEditContent("");
+    setEditOriginal("");
+    setEditError("");
+    setFileFilter("");
+  }
+
+  /** Dosyayı diskten okuyup düzenleyiciye alır. */
+  async function openFile(path: string) {
+    if (!projectId) return;
+    if (editPath && editContent !== editOriginal) {
+      if (!confirm(`"${editPath}" içindeki kaydedilmemiş değişiklikler kaybolacak. Devam?`)) {
+        return;
+      }
+    }
+    setEditError("");
+    setEditBusy(true);
+    try {
+      const res = await fetch(
+        `/api/repo/file?projectId=${projectId}&path=${encodeURIComponent(path)}`,
+      );
+      if (!res.ok) {
+        setEditError(await res.text());
+        setEditPath("");
+        return;
+      }
+      const data = await res.json();
+      setEditPath(path);
+      setEditContent(data.content);
+      setEditOriginal(data.content);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : "Dosya açılamadı.");
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  /** Düzenlenen dosyayı diske yazar; sonra diff'i ve önizlemeyi tazeler. */
+  async function saveFile() {
+    if (!projectId || !editPath || editBusy) return;
+    setEditError("");
+    setEditBusy(true);
+    try {
+      const res = await fetch("/api/repo/file", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, path: editPath, content: editContent }),
+      });
+      if (!res.ok) {
+        setEditError(await res.text());
+        return;
+      }
+      setEditOriginal(editContent);
+      await refreshChanges(projectId);
+      setPreviewKey((k) => k + 1);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : "Kaydedilemedi.");
+    } finally {
+      setEditBusy(false);
+    }
   }
 
   async function runAgent(text: string, useMode: "build" | "plan") {
@@ -613,7 +689,7 @@ export default function RepoStudio({
               href="/"
               className="text-[12.5px] text-stone-400 transition hover:text-orange-500"
             >
-              ← Yeni tasarım (boş sayfadan)
+              ← Başa dön
             </Link>
           </div>
         </div>
@@ -662,7 +738,7 @@ export default function RepoStudio({
               href="/"
               className="rounded-xl bg-white px-3 py-1.5 text-[12px] font-medium text-stone-600 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50"
             >
-              ← Yeni tasarım
+              ← Başa dön
             </Link>
             <button
               onClick={() => {
@@ -670,6 +746,7 @@ export default function RepoStudio({
                 setDevStatus("idle");
                 setDevPort(null);
                 setFramePort(null);
+                resetEditor();
                 setProjectId(null);
                 setMessages([]);
                 loadProjects();
@@ -802,6 +879,7 @@ export default function RepoStudio({
                 <option value="minimal">Minimal</option>
                 <option value="serbest">Serbest</option>
                 <option value="ruki">Ruki 🐵</option>
+                <option value="ai">AI ✦</option>
               </select>
             </div>
             <span className="shrink-0 text-[11px] text-stone-400">
@@ -869,6 +947,17 @@ export default function RepoStudio({
               }`}
             >
               Önizleme
+            </button>
+            <button
+              onClick={() => setTab("files")}
+              className={`rounded-full px-3 py-1 transition ${
+                tab === "files"
+                  ? "bg-orange-400 text-white"
+                  : "text-stone-400 hover:text-stone-600"
+              }`}
+            >
+              Dosyalar
+              {editPath && editContent !== editOriginal ? " •" : ""}
             </button>
             <button
               onClick={() => setTab("changes")}
@@ -1005,6 +1094,112 @@ export default function RepoStudio({
                 )}
               </div>
             )
+          ) : tab === "files" ? (
+            <div className="flex h-full">
+              {/* dosya ağacı */}
+              <div className="flex w-64 shrink-0 flex-col border-r border-stone-100">
+                <div className="p-2">
+                  <input
+                    value={fileFilter}
+                    onChange={(e) => setFileFilter(e.target.value)}
+                    placeholder="Dosya ara…"
+                    className="w-full rounded-lg bg-stone-50 px-2.5 py-1.5 text-[12px] outline-none ring-1 ring-stone-200 focus:ring-orange-300"
+                  />
+                </div>
+                <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2 pt-0">
+                  {tree
+                    .filter((t) => t.type === "file")
+                    .filter((t) =>
+                      fileFilter
+                        ? t.path.toLowerCase().includes(fileFilter.toLowerCase())
+                        : true,
+                    )
+                    .slice(0, 500)
+                    .map((t) => (
+                      <button
+                        key={t.path}
+                        onClick={() => openFile(t.path)}
+                        title={t.path}
+                        className={`block w-full truncate rounded-lg px-2 py-1 text-left text-[12px] transition ${
+                          editPath === t.path
+                            ? "bg-orange-100 text-stone-700"
+                            : "text-stone-500 hover:bg-orange-50"
+                        }`}
+                      >
+                        {t.path}
+                      </button>
+                    ))}
+                  {tree.filter((t) => t.type === "file").length === 0 && (
+                    <p className="p-2 text-[12px] text-stone-400">Dosya yok.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* düzenleyici */}
+              <div className="flex min-w-0 flex-1 flex-col">
+                {editPath ? (
+                  <>
+                    <div className="flex items-center justify-between gap-2 border-b border-stone-100 px-3 py-2">
+                      <span className="truncate text-[12px] text-stone-500">
+                        {editPath}
+                        {editContent !== editOriginal && (
+                          <span className="ml-1.5 text-orange-500">• kaydedilmedi</span>
+                        )}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <button
+                          onClick={() => setEditContent(editOriginal)}
+                          disabled={editBusy || editContent === editOriginal}
+                          className="rounded-lg bg-white px-2 py-1 text-[11.5px] text-stone-600 transition hover:bg-orange-50 disabled:opacity-40"
+                        >
+                          Geri al
+                        </button>
+                        <button
+                          onClick={saveFile}
+                          disabled={editBusy || editContent === editOriginal}
+                          className="rounded-lg bg-orange-400 px-2.5 py-1 text-[11.5px] font-medium text-white transition hover:bg-orange-500 disabled:opacity-40"
+                        >
+                          {editBusy ? "Kaydediliyor…" : "Kaydet"}
+                        </button>
+                      </span>
+                    </div>
+                    {editError && (
+                      <p className="border-b border-rose-100 bg-rose-50 px-3 py-2 text-[12px] text-rose-600">
+                        {editError}
+                      </p>
+                    )}
+                    <textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Ctrl/Cmd+S ile kaydet — tarayıcının kaydet penceresini engelle.
+                        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+                          e.preventDefault();
+                          void saveFile();
+                        }
+                      }}
+                      spellCheck={false}
+                      className="min-h-0 flex-1 resize-none bg-stone-900/95 p-3 font-[family-name:var(--font-mono)] text-[12px] leading-relaxed text-stone-100 outline-none"
+                    />
+                  </>
+                ) : (
+                  <div className="grid h-full place-items-center px-6 text-center">
+                    <div>
+                      <p className="text-[13px] text-stone-500">
+                        Düzenlemek için soldan bir dosya seç.
+                      </p>
+                      <p className="mt-1.5 text-[12px] text-stone-400">
+                        Kaydedince değişiklik &quot;Değişenler&quot; sekmesine düşer ve
+                        önizleme tazelenir. (Ctrl/Cmd+S da kaydeder.)
+                      </p>
+                      {editError && (
+                        <p className="mt-3 text-[12px] text-rose-600">{editError}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="flex h-full">
               {/* değişen dosya listesi */}

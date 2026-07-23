@@ -60,7 +60,7 @@ export async function POST(req: Request) {
   }
 
   const response = isForm
-    ? NextResponse.redirect(new URL("/basla", req.url), 303)
+    ? NextResponse.redirect(new URL("/", req.url), 303)
     : NextResponse.json({ ok: true });
 
   // Çereze şifreden türetilen bir şey DEĞİL, süreli ve imzalı bir oturum

@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { Logo, SLOGAN } from "../logo";
 
 /**
@@ -17,6 +18,9 @@ export default async function Giris({
 }: {
   searchParams: Promise<{ hata?: string }>;
 }) {
+  // Şifre kapısı kapalıysa (APP_PASSWORD yok) giriş ekranının anlamı yok.
+  if (!process.env.APP_PASSWORD) redirect("/");
+
   const { hata } = await searchParams;
 
   const mesaj =

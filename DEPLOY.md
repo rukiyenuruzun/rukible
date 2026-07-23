@@ -47,9 +47,11 @@ Her biri için "Production", "Preview" ve "Development" kutularının üçünü 
 
 İsteğe bağlı: `MODEL` (varsayılan `moonshotai/kimi-k3`).
 
-> `APP_PASSWORD` ya da `SESSION_SECRET` tanımlı değilse araç bilerek açılmaz.
-> Bu, "şifre koymayı unutup interneti açık bırakma" ihtimalini ortadan
-> kaldırmak için.
+> **DİKKAT:** `APP_PASSWORD` tanımlı değilse şifre kapısı hiç devreye girmez ve
+> araç herkese açık olur. Bu, yerel/tek kullanıcılı kullanımı kolaylaştırmak
+> için bilinçli bir tercih — ama internete açık bir kurulumda bu alanı
+> doldurmak ZORUNLU. `SESSION_SECRET` de yanında tanımlı olmalı, yoksa oturum
+> çerezi imzalanamaz ve araç 503 döner.
 >
 > `SESSION_SECRET`'i değiştirmek tüm oturumları anında geçersiz kılar — çerezi
 > çalınan biri olursa acil "herkesi çıkart" düğmen budur.
