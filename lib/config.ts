@@ -51,6 +51,8 @@ export const REPO_LIMITS = {
   maxReadBytes: 256 * 1024, // 256 KB
   /** write_file ile yazılabilecek en fazla bayt. */
   maxWriteBytes: 512 * 1024, // 512 KB
+  /** save_image ile projeye kaydedilebilecek en büyük görsel (bayt). */
+  maxImageBytes: 4 * 1024 * 1024, // 4 MB
   /** git clone zaman aşımı (ms). */
   cloneTimeoutMs: 90_000,
   /** Araçlı döngüde en fazla model turu. */

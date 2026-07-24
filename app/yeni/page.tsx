@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "reac
 import Link from "next/link";
 import { Logo, SLOGAN } from "../logo";
 import { applyPatches } from "@/lib/patch";
+import { fileToDataUrl } from "@/lib/imageAttach";
 import { SITE_URL } from "@/lib/config";
 
 type ChatMessage = {
@@ -84,39 +85,6 @@ function saveChatToDb(projectId: string, msgs: ChatMessage[]): void {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat: msgs }),
   }).catch(() => {});
-}
-
-/**
- * Bir görsel dosyasını küçültüp data URL'e çevirir. Ekran görüntüleri büyük
- * olabiliyor; uzun kenarı en fazla 1600px'e indirip JPEG %85 ile kodluyoruz —
- * hem maliyet hem de model sınırları için makul boyut.
- */
-function fileToDataUrl(file: File, maxDim = 1600, quality = 0.85): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (Math.max(width, height) > maxDim) {
-        const scale = maxDim / Math.max(width, height);
-        width = Math.round(width * scale);
-        height = Math.round(height * scale);
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return reject(new Error("canvas yok"));
-      ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL("image/jpeg", quality));
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("görsel okunamadı"));
-    };
-    img.src = url;
-  });
 }
 
 /** Model bazen ```html ... ``` sarmalıyla döndürür; onu temizler. */

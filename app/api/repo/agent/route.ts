@@ -8,7 +8,13 @@ import {
 } from "@/lib/config";
 import { line } from "@/lib/ndjson";
 import { AGENT_SYSTEM_PROMPT, AGENT_PLAN_PROMPT } from "@/lib/agentPrompt";
-import { REPO_TOOLS, REPO_TOOLS_READONLY, runTool, toolLabel } from "@/lib/repoTools";
+import {
+  REPO_TOOLS,
+  REPO_TOOLS_READONLY,
+  SAVE_IMAGE_TOOL,
+  runTool,
+  toolLabel,
+} from "@/lib/repoTools";
 import { isValidProjectId, workdirExists } from "@/lib/workspace";
 import { withRepoLock } from "@/lib/repoLock";
 
@@ -42,6 +48,7 @@ export async function POST(req: Request) {
     messages?: ChatMessage[];
     mode?: string;
     style?: string;
+    image?: string;
   };
   try {
     body = await req.json();
@@ -52,7 +59,25 @@ export async function POST(req: Request) {
   const projectId = body.projectId ?? "";
   const messages = body.messages ?? [];
   const isPlan = body.mode === "plan";
-  const tools = isPlan ? REPO_TOOLS_READONLY : REPO_TOOLS;
+
+  // Son kullanıcı mesajına iliştirilen görsel (ekran görüntüsü / eklenecek foto).
+  // ~8 MB üstünü reddet (kaza/kötüye kullanım freni).
+  const image =
+    typeof body.image === "string" &&
+    body.image.startsWith("data:image/") &&
+    body.image.length < 8_000_000
+      ? body.image
+      : undefined;
+  // "data:image/png;base64,..." -> "image/png" (model uzantıyı doğru seçsin diye).
+  const imageMime = image ? image.slice(5, image.indexOf(";")) : "";
+
+  // Görsel varken build modunda save_image de sunulur; görsel yokken model bu
+  // aracı hiç görmez (boşuna çağırmasın).
+  const tools = isPlan
+    ? REPO_TOOLS_READONLY
+    : image
+      ? [...REPO_TOOLS, SAVE_IMAGE_TOOL]
+      : REPO_TOOLS;
 
   // Görsel değişikliklerde uyulacak tasarım tercihi (yalnız build modunda).
   const STYLE_NOTES: Record<string, string> = {
@@ -77,9 +102,19 @@ export async function POST(req: Request) {
     muhendis: "",
   };
   const styleNote = STYLE_NOTES[String(body.style ?? "")] ?? "";
+  const imageNote = image
+    ? `\n\nGÖRSEL: Kullanıcı son mesajına bir görsel iliştirdi (${imageMime}). ` +
+      (isPlan
+        ? "Görseli incele ve planında dikkate al."
+        : "Bir sorunu/ekran görüntüsünü gösteriyorsa düzeltmeyi ona göre yap. " +
+          "Kullanıcı görselin KENDİSİNİ projeye eklemeni istiyorsa save_image ile " +
+          "kaydet (uzantıyı formatına uygun seç) ve gereken yerde bu dosyaya " +
+          "referans ver.")
+    : "";
   const systemPrompt =
     (isPlan ? AGENT_PLAN_PROMPT : AGENT_SYSTEM_PROMPT) +
-    (styleNote && !isPlan ? `\n\nTASARIM TERCİHİ (görsel değişikliklerde): ${styleNote}` : "");
+    (styleNote && !isPlan ? `\n\nTASARIM TERCİHİ (görsel değişikliklerde): ${styleNote}` : "") +
+    imageNote;
   if (!isValidProjectId(projectId)) {
     return new Response("Geçersiz proje kimliği.", { status: 400 });
   }
@@ -96,6 +131,27 @@ export async function POST(req: Request) {
     { role: "system", content: systemPrompt },
     ...messages.map((m) => ({ role: m.role, content: m.content }) as Msg),
   ];
+
+  // Görsel eklendiyse son kullanıcı mesajını çok-kipli içeriğe çevir ki model
+  // NE gösterdiğini görsün (yeni sayfa üretecindeki akışın aynısı).
+  if (image) {
+    for (let i = conversation.length - 1; i >= 0; i--) {
+      if (conversation[i].role === "user") {
+        const txt =
+          typeof conversation[i].content === "string"
+            ? (conversation[i].content as string)
+            : "";
+        conversation[i] = {
+          role: "user",
+          content: [
+            { type: "text", text: txt || "Bu görseldeki duruma göre yardımcı ol." },
+            { type: "image_url", image_url: { url: image } },
+          ],
+        };
+        break;
+      }
+    }
+  }
 
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost: 0 };
 
@@ -182,7 +238,7 @@ export async function POST(req: Request) {
               const fargs = call.function.arguments ?? "{}";
               controller.enqueue(line({ t: toolLabel(fname, fargs) }));
 
-              const result = await runTool(projectId, fname, fargs);
+              const result = await runTool(projectId, fname, fargs, { image });
               if (result.event) {
                 if ("w" in result.event) yazilanDosya++;
                 controller.enqueue(line(result.event));

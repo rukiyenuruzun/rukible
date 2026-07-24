@@ -2,6 +2,7 @@ import type OpenAI from "openai";
 import {
   listTree,
   readTextFile,
+  writeBinaryFile,
   writeTextFile,
   WorkdirError,
 } from "@/lib/workspace";
@@ -78,6 +79,34 @@ export const REPO_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ];
 
+/**
+ * Kullanıcı mesajına görsel iliştirdiğinde (yalnız build modunda) araç
+ * listesine eklenir; başka zaman model bu aracı hiç görmez (bkz. agent route).
+ */
+export const SAVE_IMAGE_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
+  type: "function",
+  function: {
+    name: "save_image",
+    description:
+      "Kullanıcının bu mesaja iliştirdiği görseli projeye dosya olarak kaydeder " +
+      "(örn. assets/logo.png). Kullanıcı görseli projeye/sayfaya eklemeni " +
+      "istiyorsa önce bununla kaydet, sonra HTML/CSS'te bu yola referans ver.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Proje köküne göre hedef dosya yolu; uzantıyı görselin formatına " +
+            "uygun seç (jpg/png/webp)",
+        },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
+};
+
 /** Plan modu: salt-okunur araçlar (write_file YOK) — sadece keşfedip planlar. */
 export const REPO_TOOLS_READONLY: OpenAI.Chat.Completions.ChatCompletionTool[] =
   REPO_TOOLS.filter(
@@ -96,6 +125,7 @@ export function toolLabel(name: string, argsRaw: string): string {
     const a = JSON.parse(argsRaw || "{}");
     if (name === "read_file" && a.path) return `okuyor: ${a.path}`;
     if (name === "write_file" && a.path) return `yazıyor: ${a.path}`;
+    if (name === "save_image" && a.path) return `görseli kaydediyor: ${a.path}`;
     if (name === "search" && a.query) return `arıyor: "${a.query}"`;
     if (name === "list_files") return "dosyaları listeliyor";
   } catch {
@@ -108,6 +138,7 @@ export async function runTool(
   projectId: string,
   name: string,
   argsRaw: string,
+  ctx: { image?: string } = {},
 ): Promise<ToolResult> {
   let args: Record<string, unknown>;
   try {
@@ -137,6 +168,22 @@ export async function runTool(
         return {
           content: `OK: ${p} yazıldı (${Buffer.byteLength(content)} bayt).`,
           event: { w: `${p} yazıldı` },
+        };
+      }
+      case "save_image": {
+        const p = String(args.path ?? "");
+        if (!p) return { content: "HATA: path gerekli." };
+        if (!ctx.image) {
+          return { content: "HATA: bu mesaja iliştirilmiş bir görsel yok." };
+        }
+        // data:image/png;base64,... -> ham baytlar
+        const comma = ctx.image.indexOf(",");
+        const buf = Buffer.from(comma >= 0 ? ctx.image.slice(comma + 1) : "", "base64");
+        if (buf.byteLength === 0) return { content: "HATA: görsel verisi çözülemedi." };
+        await writeBinaryFile(projectId, p, buf);
+        return {
+          content: `OK: görsel ${p} olarak kaydedildi (${buf.byteLength} bayt).`,
+          event: { w: `${p} kaydedildi` },
         };
       }
       case "search": {

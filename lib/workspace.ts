@@ -240,6 +240,26 @@ export async function writeTextFile(
   await fs.writeFile(abs, content, "utf8");
 }
 
+/** Sohbete iliştirilen görseli projeye ikili dosya olarak yazar (save_image). */
+export async function writeBinaryFile(
+  projectId: string,
+  rel: string,
+  data: Buffer,
+): Promise<void> {
+  assertWritable(rel);
+  const abs = safeAbsPath(projectId, rel);
+  if (data.byteLength > REPO_LIMITS.maxImageBytes) {
+    throw new WorkdirError(
+      "too_large",
+      `Görsel çok büyük (${data.byteLength} bayt), yazılmadı: ${rel}`,
+    );
+  }
+  await fs.mkdir(path.dirname(abs), { recursive: true });
+  // mkdir sonrası symlink kontrolü (üst klasör artık var).
+  await assertRealInside(projectId, abs);
+  await fs.writeFile(abs, data);
+}
+
 /** Önizleme için ham bayt döner (ikili/asset dahil), yol+symlink güvenli. */
 export async function readAsset(
   projectId: string,

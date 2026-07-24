@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { Logo, SLOGAN } from "../logo";
 import { readNdjson } from "@/lib/streamChat";
 import { downloadText } from "@/lib/download";
+import { fileToDataUrl } from "@/lib/imageAttach";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -12,6 +13,8 @@ type ChatMessage = {
   tone?: "ok" | "warn";
   /** true ise bu asistan mesajı bir plandır; altında "Uygula" düğmesi çıkar. */
   plan?: boolean;
+  /** true ise kullanıcı bu mesaja bir görsel iliştirdi (sohbette işaret gösterilir). */
+  hasImage?: boolean;
 };
 type RepoProject = {
   id: string;
@@ -79,6 +82,10 @@ export default function RepoStudio({
   const [error, setError] = useState("");
   const [mode, setMode] = useState<"build" | "plan">("build");
   const [cost, setCost] = useState(0);
+  // Sıradaki mesaja iliştirilecek görsel (ekran görüntüsü / projeye eklenecek
+  // foto) — data URL. Orijinal dosya küçükse format bozulmadan taşınır ki ajan
+  // save_image ile projeye birebir kaydedebilsin.
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
 
   const [tab, setTab] = useState<"preview" | "changes" | "files">("preview");
 
@@ -122,6 +129,25 @@ export default function RepoStudio({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  /** Görsel seçildiğinde: data URL'e çevir, sıradaki mesaja iliştir. */
+  async function handleFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // aynı dosyayı tekrar seçebilmek için sıfırla
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Sadece görsel (resim) eklenebilir.");
+      return;
+    }
+    try {
+      // 3 MB altı dosyalar olduğu gibi taşınır (şeffaf PNG bozulmasın);
+      // daha büyükleri küçültülüp JPEG'e çevrilir.
+      setPendingImage(await fileToDataUrl(file, { keepOriginalUnder: 3_000_000 }));
+    } catch {
+      setError("Görsel işlenemedi.");
+    }
+  }
 
   const loadProjects = useCallback(async () => {
     try {
@@ -390,6 +416,7 @@ export default function RepoStudio({
     setEditOriginal("");
     setEditError("");
     setFileFilter("");
+    setPendingImage(null);
   }
 
   /** Dosyayı diskten okuyup düzenleyiciye alır. */
@@ -447,10 +474,20 @@ export default function RepoStudio({
     }
   }
 
-  async function runAgent(text: string, useMode: "build" | "plan") {
-    if (!text || !projectId || streaming) return;
+  async function runAgent(
+    text: string,
+    useMode: "build" | "plan",
+    img?: string | null,
+  ) {
+    // Görsel varsa metin olmadan da gönderilebilir.
+    if ((!text && !img) || !projectId || streaming) return;
 
-    const next = [...messages, { role: "user" as const, content: text }];
+    // API'ye gerçek metni gönder; ekranda görselli boş mesajı "📷 Görsel" göster.
+    const apiMessages = [...messages, { role: "user" as const, content: text }];
+    const next: ChatMessage[] = [
+      ...messages,
+      { role: "user", content: text || "📷 Görsel", hasImage: !!img },
+    ];
     setMessages(next);
     setStreaming(true);
     setLiveText("");
@@ -473,7 +510,8 @@ export default function RepoStudio({
           projectId,
           mode: useMode,
           style,
-          messages: next.map((m) => ({ role: m.role, content: m.content })),
+          image: img || undefined,
+          messages: apiMessages.map((m) => ({ role: m.role, content: m.content })),
         }),
         signal: controller.signal,
       });
@@ -554,9 +592,11 @@ export default function RepoStudio({
 
   function send() {
     const text = input.trim();
-    if (!text) return;
+    const img = pendingImage;
+    if (!text && !img) return;
     setInput("");
-    void runAgent(text, mode);
+    setPendingImage(null); // iliştirildi; kutuyu boşalt
+    void runAgent(text, mode, img);
   }
 
   async function renameProject(id: string) {
@@ -791,6 +831,7 @@ export default function RepoStudio({
                 key={i}
                 className="ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-orange-100/80 px-4 py-2.5 text-[13px] leading-relaxed text-stone-700"
               >
+                {m.hasImage && <span className="mr-1" aria-hidden="true">📷</span>}
                 {m.content}
               </div>
             ) : m.plan ? (
@@ -892,6 +933,20 @@ export default function RepoStudio({
                 <option value="ruki">Ruki 🐵</option>
                 <option value="ai">AI ✦</option>
               </select>
+              <button
+                onClick={() => fileRef.current?.click()}
+                title="Görsel ekle — sorunlu yerin ekran görüntüsü ya da projeye eklenecek foto"
+                className="rounded-full px-2 py-1 text-[13px] text-stone-400 transition hover:bg-orange-100 hover:text-stone-700"
+              >
+                📎
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFile}
+                className="hidden"
+              />
             </div>
             <span className="shrink-0 text-[11px] text-stone-400">
               {usage?.kalan != null && (
@@ -908,6 +963,25 @@ export default function RepoStudio({
             </span>
           </div>
           <div className="rounded-2xl bg-white p-2 shadow-[0_1px_3px_rgba(120,80,60,0.08)]">
+            {/* İliştirilen görsel önizlemesi */}
+            {pendingImage && (
+              <div className="mb-1 flex items-center gap-2 px-1">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={pendingImage}
+                  alt="eklenen görsel"
+                  className="h-12 w-12 rounded-lg object-cover ring-1 ring-orange-200"
+                />
+                <span className="text-[11.5px] text-stone-500">Görsel eklendi</span>
+                <button
+                  onClick={() => setPendingImage(null)}
+                  title="Görseli kaldır"
+                  className="rounded-full px-1.5 text-[13px] text-stone-400 transition hover:text-rose-600"
+                >
+                  ×
+                </button>
+              </div>
+            )}
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -935,7 +1009,7 @@ export default function RepoStudio({
             ) : (
               <button
                 onClick={send}
-                disabled={!input.trim()}
+                disabled={!input.trim() && !pendingImage}
                 className="w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
               >
                 {mode === "plan" ? "Planla" : "Gönder"}
