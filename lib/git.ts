@@ -70,6 +70,56 @@ export async function cloneRepo(url: string, dest: string): Promise<void> {
   );
 }
 
+/** Bir ref'in SHA'sını döner (örn. "HEAD"). */
+export async function revParse(cwd: string, ref: string): Promise<string> {
+  const { stdout } = await run(["rev-parse", ref], { cwd });
+  return stdout.trim();
+}
+
+/** Üzerinde durulan dalın adını döner (single-branch klonda uzak varsayılan dal). */
+export async function currentBranch(cwd: string): Promise<string> {
+  const { stdout } = await run(["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
+  return stdout.trim();
+}
+
+/** origin uzak adresini döner (klonlama sırasında doğrulanmış URL). */
+export async function remoteUrl(cwd: string): Promise<string> {
+  const { stdout } = await run(["remote", "get-url", "origin"], { cwd });
+  return stdout.trim();
+}
+
+/** Çalışma kopyasındaki TÜM değişiklikleri tek commit yapar; yeni SHA'yı döner. */
+export async function commitAll(cwd: string, message: string): Promise<string> {
+  await run(["add", "-A"], { cwd });
+  // Kimlik repo/global config'e yazılmaz; sadece bu commit için geçilir.
+  await run(
+    ["-c", "user.name=Rukible", "-c", "user.email=rukible@localhost", "commit", "-m", message],
+    { cwd },
+  );
+  return revParse(cwd, "HEAD");
+}
+
+/** Commit'i geri alır ama dosya değişikliklerini çalışma ağacında bırakır. */
+export async function resetMixed(cwd: string, sha: string): Promise<void> {
+  await run(["reset", "--mixed", sha], { cwd });
+}
+
+/**
+ * HEAD'i uzak repodaki hedef dala gönderir. Kimlik `pushUrl` içindedir (origin
+ * config'ine yazılmaz, diske token sızmaz). Refspec "HEAD:" ile başladığı için
+ * dal adı hiçbir zaman komut seçeneği gibi ayrıştırılamaz.
+ */
+export async function pushHeadTo(
+  cwd: string,
+  pushUrl: string,
+  branch: string,
+): Promise<void> {
+  await run(["push", pushUrl, `HEAD:refs/heads/${branch}`], {
+    cwd,
+    timeoutMs: 60_000,
+  });
+}
+
 export type GitFileStatus = "added" | "modified" | "deleted";
 
 export type GitChange = { path: string; status: GitFileStatus };

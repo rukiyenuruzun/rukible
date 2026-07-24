@@ -115,6 +115,16 @@ export default function RepoStudio({
   const [changes, setChanges] = useState<RepoChange[]>([]);
   const [selected, setSelected] = useState(0);
 
+  // Commit & Push (Değişenler sekmesi)
+  const [pushMsg, setPushMsg] = useState("");
+  const [pushBranch, setPushBranch] = useState("");
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushNote, setPushNote] = useState<{
+    tone: "ok" | "err";
+    text: string;
+    prUrl?: string | null;
+  } | null>(null);
+
   // Boş durum (proje seçili değil): klonlama ekranı
   const [cloneUrl, setCloneUrl] = useState("");
   const [cloning, setCloning] = useState(false);
@@ -620,6 +630,43 @@ export default function RepoStudio({
 
   function applyPlan(planText: string) {
     void runAgent(`Şu planı uygula:\n\n${planText}`, "build");
+  }
+
+  /** Değişiklikleri tek commit yapıp origin'e push'lar (bkz. api/repo/push). */
+  async function commitPush() {
+    if (!projectId || pushBusy || changes.length === 0) return;
+    setPushBusy(true);
+    setPushNote(null);
+    try {
+      const res = await fetch("/api/repo/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          message: pushMsg.trim() || undefined,
+          branch: pushBranch.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        setPushNote({ tone: "err", text: await res.text() });
+        return;
+      }
+      const d = await res.json();
+      setPushNote({
+        tone: "ok",
+        text: d.direct
+          ? `${d.branch} dalına push'landı (${d.sha}).`
+          : `Yeni "${d.branch}" dalına push'landı (${d.sha}).`,
+        prUrl: d.prUrl,
+      });
+      setPushMsg("");
+      // Commit sonrası fark kalmaz; liste boşalır.
+      await refreshChanges(projectId);
+    } catch (e) {
+      setPushNote({ tone: "err", text: (e as Error).message ?? "Push başarısız." });
+    } finally {
+      setPushBusy(false);
+    }
   }
 
   // ---------- BOŞ DURUM: klonlama ekranı ----------
@@ -1286,7 +1333,57 @@ export default function RepoStudio({
               </div>
             </div>
           ) : (
-            <div className="flex h-full">
+            <div className="flex h-full flex-col">
+              {/* Commit & Push çubuğu */}
+              <div className="flex items-center gap-2 border-b border-stone-100 px-3 py-2">
+                <input
+                  value={pushMsg}
+                  onChange={(e) => setPushMsg(e.target.value)}
+                  placeholder="Commit mesajı (örn. iletişim bölümü koyulaştırıldı)"
+                  className="min-w-0 flex-1 rounded-lg bg-stone-50 px-2.5 py-1.5 text-[12px] outline-none ring-1 ring-stone-200 focus:ring-orange-300"
+                />
+                <input
+                  value={pushBranch}
+                  onChange={(e) => setPushBranch(e.target.value)}
+                  placeholder="dal (boş: rukible/tarih)"
+                  title="Push'lanacak dal. Boş bırakılırsa yeni bir rukible/tarih dalı açılır; mevcut dala (örn. main) doğrudan göndermek için adını yaz."
+                  className="w-44 shrink-0 rounded-lg bg-stone-50 px-2.5 py-1.5 text-[12px] outline-none ring-1 ring-stone-200 focus:ring-orange-300"
+                />
+                <button
+                  onClick={commitPush}
+                  disabled={pushBusy || streaming || changes.length === 0}
+                  className="shrink-0 rounded-lg bg-orange-400 px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-orange-500 disabled:opacity-40"
+                >
+                  {pushBusy ? "Gönderiliyor…" : "Commit & Push"}
+                </button>
+              </div>
+              {pushNote && (
+                <p
+                  className={`border-b px-3 py-2 text-[12px] ${
+                    pushNote.tone === "ok"
+                      ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                      : "border-rose-100 bg-rose-50 text-rose-600"
+                  }`}
+                >
+                  {pushNote.tone === "ok" && <span aria-hidden="true">✓ </span>}
+                  <span className="whitespace-pre-line">{pushNote.text}</span>
+                  {pushNote.prUrl && (
+                    <>
+                      {" "}
+                      <a
+                        href={pushNote.prUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium underline hover:text-emerald-900"
+                      >
+                        PR aç ↗
+                      </a>
+                    </>
+                  )}
+                </p>
+              )}
+
+              <div className="flex min-h-0 flex-1">
               {/* değişen dosya listesi */}
               <div className="w-56 shrink-0 space-y-1 overflow-y-auto border-r border-stone-100 p-2">
                 {changes.length === 0 && (
@@ -1371,6 +1468,7 @@ export default function RepoStudio({
                 ) : (
                   <p className="p-4 text-[12px] text-stone-400">Bir dosya seç.</p>
                 )}
+              </div>
               </div>
             </div>
           )}
