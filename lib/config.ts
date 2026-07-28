@@ -97,6 +97,22 @@ export const REASONING_EFFORT_HARD = "medium";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 /**
+ * OpenRouter sağlayıcı tercihi (istek gövdesindeki `provider` alanı).
+ *
+ * Kimi'yi Moonshot dışında birkaç üçüncü parti sağlayıcı da barındırıyor ve
+ * OpenRouter varsayılan olarak aralarında yönlendirme yapıyor. Bu sağlayıcılar
+ * bozulduğunda istekler bağlantı kesmesiyle ("Ajan hatası: terminated") ya da
+ * araç çağırmayan boş cevaplarla sonuçlanabiliyor (2026-07-28'de yaşandı).
+ * Önce modelin kendi sağlayıcısı denensin; o da çalışmazsa OpenRouter kalan
+ * sağlayıcılara düşer (allow_fallbacks). Model Moonshot dışı bir modele
+ * alınırsa listedeki ad eşleşmez ve tercih kendiliğinden etkisiz kalır.
+ */
+export const PROVIDER_PREFS = {
+  order: ["moonshotai"],
+  allow_fallbacks: true,
+} as const;
+
+/**
  * Paylaşım linklerinde kullanılacak asıl adres.
  *
  * Vercel her deploy için ayrı bir önizleme adresi üretir ve bunları kendi

@@ -5,6 +5,7 @@ import {
   MAX_EDIT_TOKENS,
   MAX_PLAN_TOKENS,
   OPENROUTER_BASE_URL,
+  PROVIDER_PREFS,
   REASONING_EFFORT_HARD,
 } from "@/lib/config";
 import {
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
     messages?: ChatMessage[];
     currentHtml?: string;
     mode?: string;
-    image?: string;
+    images?: string[];
     style?: string;
   };
   try {
@@ -49,7 +50,7 @@ export async function POST(req: Request) {
     return new Response("Geçersiz istek gövdesi.", { status: 400 });
   }
 
-  const { messages = [], currentHtml, mode, image, style } = body;
+  const { messages = [], currentHtml, mode, style } = body;
   if (messages.length === 0) {
     return new Response("Mesaj bulunamadı.", { status: 400 });
   }
@@ -144,21 +145,23 @@ export async function POST(req: Request) {
 
   conversation.push(...messages);
 
-  // Görsel eklendiyse (ekran görüntüsü vb.) son kullanıcı mesajına iliştir ki
-  // model NE gösterdiğini görsün. ~8 MB üstünü reddet (kaza/kötüye kullanım freni).
-  if (
-    typeof image === "string" &&
-    image.startsWith("data:image/") &&
-    image.length < 8_000_000
-  ) {
+  // Görsel(ler) eklendiyse (ekran görüntüsü vb.) son kullanıcı mesajına iliştir
+  // ki model NE gösterdiğini görsün. En fazla 4 adet; toplamda ~8 MB üstünü
+  // reddet (kaza/kötüye kullanım freni).
+  const rawImages = (Array.isArray(body.images) ? body.images : [])
+    .filter((u): u is string => typeof u === "string" && u.startsWith("data:image/"))
+    .slice(0, 4);
+  const images =
+    rawImages.reduce((n, u) => n + u.length, 0) < 8_000_000 ? rawImages : [];
+  if (images.length) {
     for (let i = conversation.length - 1; i >= 0; i--) {
       if (conversation[i].role === "user") {
         const txt = typeof conversation[i].content === "string" ? (conversation[i].content as string) : "";
         conversation[i] = {
           role: "user",
           content: [
-            { type: "text", text: txt || "Bu görseldeki duruma göre yardımcı ol." },
-            { type: "image_url", image_url: { url: image } },
+            { type: "text", text: txt || "Bu görsel(ler)deki duruma göre yardımcı ol." },
+            ...images.map((u) => ({ type: "image_url", image_url: { url: u } })),
           ],
         };
         break;
@@ -188,6 +191,7 @@ export async function POST(req: Request) {
       stream: true,
       stream_options: { include_usage: true },
       reasoning: { effort },
+      provider: PROVIDER_PREFS,
       messages: conversation,
     } as unknown as OpenAI.ChatCompletionCreateParamsStreaming;
 

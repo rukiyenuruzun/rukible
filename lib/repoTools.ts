@@ -88,9 +88,11 @@ export const SAVE_IMAGE_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
   function: {
     name: "save_image",
     description:
-      "Kullanıcının bu mesaja iliştirdiği görseli projeye dosya olarak kaydeder " +
-      "(örn. assets/logo.png). Kullanıcı görseli projeye/sayfaya eklemeni " +
-      "istiyorsa önce bununla kaydet, sonra HTML/CSS'te bu yola referans ver.",
+      "Kullanıcının bu mesaja iliştirdiği görsellerden birini projeye dosya " +
+      "olarak kaydeder (örn. assets/logo.png). Birden fazla görsel varsa " +
+      "hangisi olduğunu index ile seç (0 = ilk görsel, mesajdaki sıra). " +
+      "Kullanıcı görseli projeye/sayfaya eklemeni istiyorsa önce bununla " +
+      "kaydet, sonra HTML/CSS'te bu yola referans ver.",
     parameters: {
       type: "object",
       properties: {
@@ -99,6 +101,11 @@ export const SAVE_IMAGE_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
           description:
             "Proje köküne göre hedef dosya yolu; uzantıyı görselin formatına " +
             "uygun seç (jpg/png/webp)",
+        },
+        index: {
+          type: "number",
+          description:
+            "Kaydedilecek görselin sırası (0'dan başlar; varsayılan 0 = ilk görsel)",
         },
       },
       required: ["path"],
@@ -138,7 +145,7 @@ export async function runTool(
   projectId: string,
   name: string,
   argsRaw: string,
-  ctx: { image?: string } = {},
+  ctx: { images?: string[] } = {},
 ): Promise<ToolResult> {
   let args: Record<string, unknown>;
   try {
@@ -173,12 +180,20 @@ export async function runTool(
       case "save_image": {
         const p = String(args.path ?? "");
         if (!p) return { content: "HATA: path gerekli." };
-        if (!ctx.image) {
+        const imgs = ctx.images ?? [];
+        if (imgs.length === 0) {
           return { content: "HATA: bu mesaja iliştirilmiş bir görsel yok." };
         }
+        const idx = Number.isInteger(Number(args.index)) ? Number(args.index) : 0;
+        const img = imgs[idx];
+        if (!img) {
+          return {
+            content: `HATA: ${idx} indeksinde görsel yok (geçerli aralık 0..${imgs.length - 1}).`,
+          };
+        }
         // data:image/png;base64,... -> ham baytlar
-        const comma = ctx.image.indexOf(",");
-        const buf = Buffer.from(comma >= 0 ? ctx.image.slice(comma + 1) : "", "base64");
+        const comma = img.indexOf(",");
+        const buf = Buffer.from(comma >= 0 ? img.slice(comma + 1) : "", "base64");
         if (buf.byteLength === 0) return { content: "HATA: görsel verisi çözülemedi." };
         await writeBinaryFile(projectId, p, buf);
         return {

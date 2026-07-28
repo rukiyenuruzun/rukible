@@ -40,6 +40,8 @@ export type DevServer = {
   startedAt: number;
   /** iframe'in bağlandığı çerçeve proxy portu (bkz. startFrameProxy). */
   framePort?: number;
+  /** Ofis ağına açık paylaşım proxy'si portu (bkz. startShareProxy). */
+  sharePort?: number;
 };
 
 type FrameProxy = { server: http.Server; port: number };
@@ -47,9 +49,21 @@ type FrameProxy = { server: http.Server; port: number };
 const g = globalThis as unknown as {
   __rukibleDev?: Map<string, DevServer>;
   __rukibleFrame?: Map<string, FrameProxy>;
+  __rukibleShare?: Map<string, FrameProxy>;
 };
 const registry: Map<string, DevServer> = (g.__rukibleDev ??= new Map());
 const frames: Map<string, FrameProxy> = (g.__rukibleFrame ??= new Map());
+const shares: Map<string, FrameProxy> = (g.__rukibleShare ??= new Map());
+
+/** Makinenin yerel ağdaki IPv4 adresi (paylaşım linki bununla kurulur). */
+export function lanIPv4(): string | null {
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const i of ifaces ?? []) {
+      if (i.family === "IPv4" && !i.internal) return i.address;
+    }
+  }
+  return null;
+}
 
 const READY_TIMEOUT_MS = 180_000;
 
@@ -222,6 +236,123 @@ function stopFrameProxy(projectId: string): void {
 }
 
 /**
+ * PAYLAŞIM PROXY'Sİ — önizlemeyi ofis ağına açar.
+ *
+ * Çerçeve proxy'siyle aynı fikir (yollar birebir aktarılır → uygulama native
+ * çalışır) ama iki farkla:
+ *  - 0.0.0.0'a bağlanır: aynı ağdaki herkes http://<ip>:<port> ile açabilir.
+ *  - Host/Origin başlıkları localhost'a çevrilir. Next 16 dev sunucusu
+ *    tanımadığı origin'lerden gelen istekleri (HMR soketi dahil) 403'lüyor
+ *    (allowedDevOrigins); klonlanan reponun config'ine dokunamayacağımız için
+ *    engel proxy'de aşılır. Dev sunucusu isteği hep "localhost"tan sanır.
+ *
+ * Link, dev sunucusu (ve bu makine) çalıştığı sürece yaşar. Rukible gibi
+ * yalnızca ofis ağına açıktır; internete çıkışı yoktur.
+ */
+function startShareProxy(projectId: string, devPort: number): Promise<number> {
+  const existing = shares.get(projectId);
+  if (existing) return Promise.resolve(existing.port);
+
+  const localHeaders = (h: http.IncomingHttpHeaders): http.IncomingHttpHeaders => {
+    const out = { ...h, host: `localhost:${devPort}` };
+    if (out.origin) out.origin = `http://localhost:${devPort}`;
+    if (out.referer) {
+      out.referer = out.referer.replace(/^https?:\/\/[^/]+/i, `http://localhost:${devPort}`);
+    }
+    return out;
+  };
+
+  // Upstream'in mutlak Location'ları köke göre yola indirgenir; istemci hangi
+  // adresle geldiyse onunla devam eder.
+  const relativeLocation = (loc: string): string =>
+    loc.replace(new RegExp(`^https?://(127\\.0\\.0\\.1|localhost):${devPort}`, "i"), "") || "/";
+
+  const server = http.createServer((req, res) => {
+    const upstream = http.request(
+      { host: "127.0.0.1", port: devPort, path: req.url, method: req.method, headers: localHeaders(req.headers) },
+      (up) => {
+        const headers: http.OutgoingHttpHeaders = { ...up.headers };
+        delete headers["x-frame-options"];
+        delete headers["content-security-policy"];
+        delete headers["content-security-policy-report-only"];
+        headers["timing-allow-origin"] = "*";
+        const loc = headers["location"];
+        if (typeof loc === "string") headers["location"] = relativeLocation(loc);
+        res.writeHead(up.statusCode ?? 502, headers);
+        up.pipe(res);
+      },
+    );
+    upstream.on("error", () => {
+      if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+      res.end("Önizleme sunucusuna ulaşılamadı.");
+    });
+    req.pipe(upstream);
+  });
+
+  // HMR web soketi ve diğer upgrade'ler — başlıklar localhost'a çevrilerek.
+  server.on("upgrade", (req, socket: Duplex, head: Buffer) => {
+    const upstream = http.request({
+      host: "127.0.0.1",
+      port: devPort,
+      path: req.url,
+      method: req.method,
+      headers: localHeaders(req.headers),
+    });
+    upstream.on("upgrade", (up, upSocket, upHead) => {
+      const lines = [`HTTP/1.1 ${up.statusCode} ${up.statusMessage}`];
+      for (let i = 0; i < up.rawHeaders.length; i += 2) {
+        lines.push(`${up.rawHeaders[i]}: ${up.rawHeaders[i + 1]}`);
+      }
+      socket.write(lines.join("\r\n") + "\r\n\r\n");
+      if (upHead?.length) socket.write(upHead);
+      upSocket.pipe(socket);
+      socket.pipe(upSocket);
+      upSocket.on("error", () => socket.destroy());
+      socket.on("error", () => upSocket.destroy());
+    });
+    upstream.on("error", () => socket.destroy());
+    if (head?.length) upstream.write(head);
+    upstream.end();
+  });
+
+  server.on("clientError", (_e, socket) => socket.destroy());
+
+  // Link sabit kalsın diye deterministik port (dev portunun iki fazlası);
+  // doluysa serbest bir porta düşülür.
+  const preferred = devPort + 2;
+  return new Promise<number>((resolve, reject) => {
+    const settle = () => {
+      const port = (server.address() as AddressInfo).port;
+      shares.set(projectId, { server, port });
+      appendLog(projectId, `✓ paylaşım proxy'si hazır: http://${lanIPv4() ?? "0.0.0.0"}:${port}`);
+      resolve(port);
+    };
+    const onError = (e: NodeJS.ErrnoException) => {
+      if (e.code !== "EADDRINUSE") return reject(e);
+      server.once("error", reject);
+      server.listen(0, "0.0.0.0", settle);
+    };
+    server.once("error", onError);
+    server.listen(preferred, "0.0.0.0", () => {
+      server.removeListener("error", onError);
+      settle();
+    });
+  });
+}
+
+function stopShareProxy(projectId: string): void {
+  const s = shares.get(projectId);
+  if (!s) return;
+  shares.delete(projectId);
+  try {
+    s.server.closeAllConnections?.();
+    s.server.close();
+  } catch {
+    // yoksay
+  }
+}
+
+/**
  * Dev sunucusu hazırsa çerçeve proxy'sinin ayakta olduğundan emin olur.
  * (Rukible süreci yeniden başladıysa proxy kaybolmuş olabilir.)
  */
@@ -236,6 +367,18 @@ export async function ensureFramePort(projectId: string): Promise<number | undef
   }
 }
 
+/** Paylaşım proxy'sinin ayakta olduğundan emin olur (bkz. ensureFramePort). */
+export async function ensureSharePort(projectId: string): Promise<number | undefined> {
+  const ds = registry.get(projectId);
+  if (!ds || ds.status !== "ready") return undefined;
+  try {
+    ds.sharePort = await startShareProxy(projectId, ds.port);
+    return ds.sharePort;
+  } catch {
+    return undefined;
+  }
+}
+
 async function waitUntilReady(ds: DevServer): Promise<void> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -244,6 +387,7 @@ async function waitUntilReady(ds: DevServer): Promise<void> {
       ds.status = "ready";
       appendLog(ds.projectId, `✓ dev sunucusu hazır: http://localhost:${ds.port}`);
       ds.framePort = await startFrameProxy(ds.projectId, ds.port).catch(() => undefined);
+      ds.sharePort = await startShareProxy(ds.projectId, ds.port).catch(() => undefined);
       return;
     }
     await new Promise((r) => setTimeout(r, 1500));
@@ -367,6 +511,7 @@ export async function startDevServer(
     };
     registry.set(projectId, ds);
     ds.framePort = await startFrameProxy(projectId, port).catch(() => undefined);
+    ds.sharePort = await startShareProxy(projectId, port).catch(() => undefined);
     return ds;
   }
 
@@ -432,6 +577,7 @@ export function stopDevServer(projectId: string): boolean {
   const ds = registry.get(projectId);
   const port = stablePort(projectId);
   stopFrameProxy(projectId);
+  stopShareProxy(projectId);
   let killed = false;
   const proc = ds?.proc;
   if (proc && proc.pid) {

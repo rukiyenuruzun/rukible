@@ -3,6 +3,7 @@ import {
   AGENT_MODEL,
   MAX_AGENT_TOKENS,
   OPENROUTER_BASE_URL,
+  PROVIDER_PREFS,
   REPO_LIMITS,
   REPO_MODE_ENABLED,
 } from "@/lib/config";
@@ -48,7 +49,7 @@ export async function POST(req: Request) {
     messages?: ChatMessage[];
     mode?: string;
     style?: string;
-    image?: string;
+    images?: string[];
   };
   try {
     body = await req.json();
@@ -60,22 +61,21 @@ export async function POST(req: Request) {
   const messages = body.messages ?? [];
   const isPlan = body.mode === "plan";
 
-  // Son kullanıcı mesajına iliştirilen görsel (ekran görüntüsü / eklenecek foto).
-  // ~8 MB üstünü reddet (kaza/kötüye kullanım freni).
-  const image =
-    typeof body.image === "string" &&
-    body.image.startsWith("data:image/") &&
-    body.image.length < 8_000_000
-      ? body.image
-      : undefined;
+  // Son kullanıcı mesajına iliştirilen görseller (ekran görüntüsü / eklenecek
+  // foto). En fazla 4 adet; toplamda ~8 MB üstünü reddet (kaza/kötüye kullanım freni).
+  const rawImages = (Array.isArray(body.images) ? body.images : [])
+    .filter((u): u is string => typeof u === "string" && u.startsWith("data:image/"))
+    .slice(0, 4);
+  const images =
+    rawImages.reduce((n, u) => n + u.length, 0) < 8_000_000 ? rawImages : [];
   // "data:image/png;base64,..." -> "image/png" (model uzantıyı doğru seçsin diye).
-  const imageMime = image ? image.slice(5, image.indexOf(";")) : "";
+  const imageMimes = images.map((u) => u.slice(5, u.indexOf(";")));
 
   // Görsel varken build modunda save_image de sunulur; görsel yokken model bu
   // aracı hiç görmez (boşuna çağırmasın).
   const tools = isPlan
     ? REPO_TOOLS_READONLY
-    : image
+    : images.length
       ? [...REPO_TOOLS, SAVE_IMAGE_TOOL]
       : REPO_TOOLS;
 
@@ -102,14 +102,16 @@ export async function POST(req: Request) {
     muhendis: "",
   };
   const styleNote = STYLE_NOTES[String(body.style ?? "")] ?? "";
-  const imageNote = image
-    ? `\n\nGÖRSEL: Kullanıcı son mesajına bir görsel iliştirdi (${imageMime}). ` +
+  const imageNote = images.length
+    ? `\n\nGÖRSEL: Kullanıcı son mesajına ${images.length} görsel iliştirdi ` +
+      `(sırayla: ${imageMimes.join(", ")}). ` +
       (isPlan
-        ? "Görseli incele ve planında dikkate al."
-        : "Bir sorunu/ekran görüntüsünü gösteriyorsa düzeltmeyi ona göre yap. " +
-          "Kullanıcı görselin KENDİSİNİ projeye eklemeni istiyorsa save_image ile " +
-          "kaydet (uzantıyı formatına uygun seç) ve gereken yerde bu dosyaya " +
-          "referans ver.")
+        ? "Görselleri incele ve planında dikkate al."
+        : "Bir sorunu/ekran görüntüsünü gösteriyorlarsa düzeltmeyi ona göre yap. " +
+          "Kullanıcı görsellerin KENDİSİNİ projeye eklemeni istiyorsa save_image ile " +
+          "kaydet — hangi görsel olduğunu index parametresiyle seç (0'dan başlar, " +
+          "mesajdaki sıra), uzantıyı formatına uygun seç ve gereken yerde bu " +
+          "dosyaya referans ver.")
     : "";
   const systemPrompt =
     (isPlan ? AGENT_PLAN_PROMPT : AGENT_SYSTEM_PROMPT) +
@@ -134,7 +136,7 @@ export async function POST(req: Request) {
 
   // Görsel eklendiyse son kullanıcı mesajını çok-kipli içeriğe çevir ki model
   // NE gösterdiğini görsün (yeni sayfa üretecindeki akışın aynısı).
-  if (image) {
+  if (images.length) {
     for (let i = conversation.length - 1; i >= 0; i--) {
       if (conversation[i].role === "user") {
         const txt =
@@ -144,8 +146,11 @@ export async function POST(req: Request) {
         conversation[i] = {
           role: "user",
           content: [
-            { type: "text", text: txt || "Bu görseldeki duruma göre yardımcı ol." },
-            { type: "image_url", image_url: { url: image } },
+            { type: "text", text: txt || "Bu görsel(ler)deki duruma göre yardımcı ol." },
+            ...images.map((u) => ({
+              type: "image_url" as const,
+              image_url: { url: u },
+            })),
           ],
         };
         break;
@@ -177,6 +182,7 @@ export async function POST(req: Request) {
               tool_choice: "auto",
               messages: conversation,
               usage: { include: true },
+              provider: PROVIDER_PREFS,
             } as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming;
 
             const resp = await client.chat.completions.create(params);
@@ -238,7 +244,7 @@ export async function POST(req: Request) {
               const fargs = call.function.arguments ?? "{}";
               controller.enqueue(line({ t: toolLabel(fname, fargs) }));
 
-              const result = await runTool(projectId, fname, fargs, { image });
+              const result = await runTool(projectId, fname, fargs, { images });
               if (result.event) {
                 if ("w" in result.event) yazilanDosya++;
                 controller.enqueue(line(result.event));

@@ -1,4 +1,5 @@
 import { getDb, makeSlug, dbError } from "@/lib/db";
+import { lanIPv4 } from "@/lib/devserver";
 
 /**
  * Bir versiyonu herkese açık hale getirir ve paylaşılabilir bir kod üretir.
@@ -23,8 +24,10 @@ export async function POST(req: Request) {
     .eq("id", body.versionId)
     .single();
 
+  // lanIp: adres çubuğu localhost olsa bile istemci linki ağdakilerin
+  // açabileceği IP ile kurabilsin diye (repo paylaşımıyla aynı yaklaşım).
   if (existing?.share_slug) {
-    return Response.json({ slug: existing.share_slug, reused: true });
+    return Response.json({ slug: existing.share_slug, reused: true, lanIp: lanIPv4() });
   }
 
   const slug = makeSlug();
@@ -34,7 +37,7 @@ export async function POST(req: Request) {
     .eq("id", body.versionId);
 
   if (error) return dbError("share.create", error, "Paylaşım linki oluşturulamadı.");
-  return Response.json({ slug, reused: false });
+  return Response.json({ slug, reused: false, lanIp: lanIPv4() });
 }
 
 /** Paylaşımı geri alır — link artık çalışmaz. */

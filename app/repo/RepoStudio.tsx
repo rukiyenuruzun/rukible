@@ -50,6 +50,38 @@ function detectFramework(tree: TreeEntry[]): string | null {
 
 const CHAT_KEY = (id: string) => `rukible_repo_chat_v1_${id}`;
 
+/** Bir mesaja iliştirilebilecek en fazla görsel sayısı. */
+const MAX_IMAGES = 4;
+
+/** Seçili stil proje başına saklanır — sohbete girince en son seçilen geri gelir. */
+const STYLE_KEY = (id: string) => `rukible_style_v1_${id}`;
+
+/**
+ * Panoya kopyalar. Ofiste araç http://<ip> üzerinden açılıyor ve güvensiz
+ * bağlamda (https değil) navigator.clipboard tanımsız — o yüzden eski
+ * execCommand yöntemine düşülür.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
 function saveChatToDb(projectId: string, msgs: ChatMessage[]): void {
   fetch(`/api/projects/${projectId}`, {
     method: "POST",
@@ -82,10 +114,10 @@ export default function RepoStudio({
   const [error, setError] = useState("");
   const [mode, setMode] = useState<"build" | "plan">("build");
   const [cost, setCost] = useState(0);
-  // Sıradaki mesaja iliştirilecek görsel (ekran görüntüsü / projeye eklenecek
+  // Sıradaki mesaja iliştirilecek görseller (ekran görüntüsü / projeye eklenecek
   // foto) — data URL. Orijinal dosya küçükse format bozulmadan taşınır ki ajan
   // save_image ile projeye birebir kaydedebilsin.
-  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
 
   const [tab, setTab] = useState<"preview" | "changes" | "files">("preview");
 
@@ -100,6 +132,8 @@ export default function RepoStudio({
   const [previewPath, setPreviewPath] = useState("");
   const [tree, setTree] = useState<TreeEntry[]>([]);
   const [previewKey, setPreviewKey] = useState(0);
+  /** "Linki kopyala" geri bildirimi (kopyalandıktan sonra kısa süre ✓). */
+  const [linkCopied, setLinkCopied] = useState(false);
 
   // Çatı önizlemesi (dev sunucusu)
   const [devStatus, setDevStatus] = useState<
@@ -109,6 +143,10 @@ export default function RepoStudio({
   // Önizleme iframe'inin bağlandığı port (dev sunucusunun önündeki çerçeve
   // proxy'si — Firefox'taki sonsuz yenilenme döngüsünü önler).
   const [framePort, setFramePort] = useState<number | null>(null);
+  // Paylaşım linki: sunucunun LAN IP'si + ofis ağına açık paylaşım proxy portu.
+  // İkisi de sunucudan gelir — adres çubuğu localhost olsa bile link doğru olur.
+  const [sharePort, setSharePort] = useState<number | null>(null);
+  const [lanIp, setLanIp] = useState<string | null>(null);
   const [devLogs, setDevLogs] = useState<string[]>([]);
   const [devError, setDevError] = useState("");
   const devPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -133,27 +171,47 @@ export default function RepoStudio({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [style, setStyle] = useState("muhendis");
+  // Varsayılan serbest; her proje kendi seçimini hatırlar (bkz. STYLE_KEY).
+  const [style, setStyle] = useState("serbest");
   const [tokens, setTokens] = useState(0);
   const [usage, setUsage] = useState<{ kalan?: number; limit?: number } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  /** Görsel seçildiğinde: data URL'e çevir, sıradaki mesaja iliştir. */
+  /** Yazdıkça çubuğu büyütür, belli bir yükseklikten sonra kendi içinde kaydırır. */
+  function autoGrow() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+  }
+
+  // Sol panel genişliği — ayraç sürüklenerek ayarlanır, localStorage'da saklanır.
+  const [panelWidth, setPanelWidth] = useState(420);
+  const draggingRef = useRef(false);
+
+  /** Görsel(ler) seçildiğinde: data URL'e çevir, sıradaki mesaja iliştir. */
   async function handleFile(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // aynı dosyayı tekrar seçebilmek için sıfırla
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // aynı dosyaları tekrar seçebilmek için sıfırla
+    if (files.length === 0) return;
+    if (files.some((f) => !f.type.startsWith("image/"))) {
       setError("Sadece görsel (resim) eklenebilir.");
       return;
     }
     try {
       // 3 MB altı dosyalar olduğu gibi taşınır (şeffaf PNG bozulmasın);
       // daha büyükleri küçültülüp JPEG'e çevrilir.
-      setPendingImage(await fileToDataUrl(file, { keepOriginalUnder: 3_000_000 }));
+      const urls = await Promise.all(
+        files.map((f) => fileToDataUrl(f, { keepOriginalUnder: 3_000_000 })),
+      );
+      if (pendingImages.length + urls.length > MAX_IMAGES) {
+        setError(`En fazla ${MAX_IMAGES} görsel eklenebilir.`);
+      }
+      setPendingImages((prev) => [...prev, ...urls].slice(0, MAX_IMAGES));
     } catch {
       setError("Görsel işlenemedi.");
     }
@@ -210,6 +268,8 @@ export default function RepoStudio({
         setDevStatus(d.status);
         if (d.port) setDevPort(d.port);
         if (d.framePort) setFramePort(d.framePort);
+        if (d.sharePort) setSharePort(d.sharePort);
+        if (d.lanIp) setLanIp(d.lanIp);
         if (Array.isArray(d.logs)) setDevLogs(d.logs);
         if (d.error) setDevError(d.error);
         if (d.status === "ready" || d.status === "error" || d.status === "stopped") {
@@ -254,6 +314,7 @@ export default function RepoStudio({
         setDevStatus("idle");
         setDevPort(null);
         setFramePort(null);
+        setSharePort(null);
         setDevLogs([]);
         resetEditor();
         setProjectId(id);
@@ -267,6 +328,8 @@ export default function RepoStudio({
         const local = localStorage.getItem(CHAT_KEY(id));
         const localMsgs = local ? (JSON.parse(local) as ChatMessage[]) : [];
         setMessages(chat.length >= localMsgs.length ? chat : localMsgs);
+        // Bu projede en son seçilen stil (yoksa serbest).
+        setStyle(localStorage.getItem(STYLE_KEY(id)) ?? "serbest");
         await refreshChanges(id);
         // Zaten çalışan bir dev sunucusu varsa hemen benimse (eski/ölü porta
         // takılmadan doğru portu göster).
@@ -274,10 +337,12 @@ export default function RepoStudio({
           const dev = await fetch(`/api/repo/dev?projectId=${id}`).then((r) =>
             r.ok ? r.json() : null,
           );
+          if (dev?.lanIp) setLanIp(dev.lanIp);
           if (dev && dev.status === "ready" && dev.port) {
             setDevStatus("ready");
             setDevPort(dev.port);
             if (dev.framePort) setFramePort(dev.framePort);
+            if (dev.sharePort) setSharePort(dev.sharePort);
           }
         } catch {
           // yoksay
@@ -303,6 +368,34 @@ export default function RepoStudio({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, liveText, steps]);
+
+  // Kayıtlı panel genişliğini geri yükle (/yeni'ninkinden ayrı anahtar).
+  useEffect(() => {
+    const saved = Number(localStorage.getItem("rukible_repo_panel"));
+    if (saved >= 300 && saved <= 720) setPanelWidth(saved);
+  }, []);
+
+  // Ayırıcıyı sürükleme.
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!draggingRef.current) return;
+      const w = Math.min(720, Math.max(300, e.clientX));
+      setPanelWidth(w);
+    }
+    function onUp() {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      localStorage.setItem("rukible_repo_panel", String(panelWidth));
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [panelWidth]);
 
   // Poll aralığını bileşen kaldırılınca temizle.
   useEffect(() => () => clearDevPoll(), [clearDevPoll]);
@@ -397,6 +490,8 @@ export default function RepoStudio({
       setDevStatus(d.status);
       if (d.port) setDevPort(d.port);
       if (d.framePort) setFramePort(d.framePort);
+      if (d.sharePort) setSharePort(d.sharePort);
+      if (d.lanIp) setLanIp(d.lanIp);
       clearDevPoll();
       devPollRef.current = setInterval(() => pollDev(projectId), 2000);
     } catch (e) {
@@ -415,6 +510,7 @@ export default function RepoStudio({
     setDevStatus("idle");
     setDevPort(null);
     setFramePort(null);
+    setSharePort(null);
     setDevLogs([]);
     setDevError("");
   }
@@ -426,7 +522,7 @@ export default function RepoStudio({
     setEditOriginal("");
     setEditError("");
     setFileFilter("");
-    setPendingImage(null);
+    setPendingImages([]);
   }
 
   /** Dosyayı diskten okuyup düzenleyiciye alır. */
@@ -487,16 +583,16 @@ export default function RepoStudio({
   async function runAgent(
     text: string,
     useMode: "build" | "plan",
-    img?: string | null,
+    imgs?: string[],
   ) {
     // Görsel varsa metin olmadan da gönderilebilir.
-    if ((!text && !img) || !projectId || streaming) return;
+    if ((!text && !imgs?.length) || !projectId || streaming) return;
 
     // API'ye gerçek metni gönder; ekranda görselli boş mesajı "📷 Görsel" göster.
     const apiMessages = [...messages, { role: "user" as const, content: text }];
     const next: ChatMessage[] = [
       ...messages,
-      { role: "user", content: text || "📷 Görsel", hasImage: !!img },
+      { role: "user", content: text || "📷 Görsel", hasImage: !!imgs?.length },
     ];
     setMessages(next);
     setStreaming(true);
@@ -520,7 +616,7 @@ export default function RepoStudio({
           projectId,
           mode: useMode,
           style,
-          image: img || undefined,
+          images: imgs?.length ? imgs : undefined,
           messages: apiMessages.map((m) => ({ role: m.role, content: m.content })),
         }),
         signal: controller.signal,
@@ -602,11 +698,12 @@ export default function RepoStudio({
 
   function send() {
     const text = input.trim();
-    const img = pendingImage;
-    if (!text && !img) return;
+    const imgs = pendingImages;
+    if (!text && imgs.length === 0) return;
     setInput("");
-    setPendingImage(null); // iliştirildi; kutuyu boşalt
-    void runAgent(text, mode, img);
+    requestAnimationFrame(autoGrow); // gönderdikten sonra çubuk eski boyuna dönsün
+    setPendingImages([]); // iliştirildi; kutuyu boşalt
+    void runAgent(text, mode, imgs);
   }
 
   async function renameProject(id: string) {
@@ -816,10 +913,26 @@ export default function RepoStudio({
       : `/api/repo/live/${projectId}`
     : "";
 
+  // Başkasına atılacak önizleme linki. Adres çubuğu localhost olsa bile doğru
+  // olsun diye makine adı sunucudan gelen LAN IP'siyle kurulur.
+  //  - Çatı projesi: ofis ağına açık paylaşım proxy'si (native çalışır; canlı
+  //    önizleme proxy'sinin aksine sayfanın JS'i/animasyonları bozulmaz).
+  //  - Statik proje: Rukible'ın statik önizleme rotası.
+  const shareHost =
+    lanIp ?? (typeof window !== "undefined" ? window.location.hostname : "");
+  const shareUrl =
+    projectId && typeof window !== "undefined" && shareHost
+      ? previewPath && hasStaticEntry(tree)
+        ? `http://${shareHost}${window.location.port ? `:${window.location.port}` : ""}/api/preview/${projectId}/${previewPath}`
+        : devStatus === "ready" && sharePort
+          ? `http://${shareHost}:${sharePort}`
+          : ""
+      : "";
+
   return (
     <main className="flex h-screen bg-[#fff7f3] text-stone-700">
       {/* SOL — sohbet */}
-      <section className="flex w-[420px] shrink-0 flex-col overflow-hidden">
+      <section style={{ width: panelWidth }} className="flex shrink-0 flex-col overflow-hidden">
         <header className="px-7 py-6">
           <div className="flex items-center gap-3">
             <Logo size={38} />
@@ -844,6 +957,7 @@ export default function RepoStudio({
                 setDevStatus("idle");
                 setDevPort(null);
                 setFramePort(null);
+                setSharePort(null);
                 resetEditor();
                 setProjectId(null);
                 setMessages([]);
@@ -969,7 +1083,10 @@ export default function RepoStudio({
               </div>
               <select
                 value={style}
-                onChange={(e) => setStyle(e.target.value)}
+                onChange={(e) => {
+                  setStyle(e.target.value);
+                  if (projectId) localStorage.setItem(STYLE_KEY(projectId), e.target.value);
+                }}
                 title="Tasarım tercihi (görsel değişikliklerde bu ruha uyulur)"
                 className="rounded-full bg-white/70 px-2.5 py-1.5 text-[11px] text-stone-600 outline-none"
               >
@@ -982,7 +1099,7 @@ export default function RepoStudio({
               </select>
               <button
                 onClick={() => fileRef.current?.click()}
-                title="Görsel ekle — sorunlu yerin ekran görüntüsü ya da projeye eklenecek foto"
+                title="Görsel ekle (birden fazla seçilebilir) — ekran görüntüsü ya da projeye eklenecek foto"
                 className="rounded-full px-2 py-1 text-[13px] text-stone-400 transition hover:bg-orange-100 hover:text-stone-700"
               >
                 📎
@@ -991,6 +1108,7 @@ export default function RepoStudio({
                 ref={fileRef}
                 type="file"
                 accept="image/*"
+                multiple
                 onChange={handleFile}
                 className="hidden"
               />
@@ -1010,28 +1128,40 @@ export default function RepoStudio({
             </span>
           </div>
           <div className="rounded-2xl bg-white p-2 shadow-[0_1px_3px_rgba(120,80,60,0.08)]">
-            {/* İliştirilen görsel önizlemesi */}
-            {pendingImage && (
-              <div className="mb-1 flex items-center gap-2 px-1">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={pendingImage}
-                  alt="eklenen görsel"
-                  className="h-12 w-12 rounded-lg object-cover ring-1 ring-orange-200"
-                />
-                <span className="text-[11.5px] text-stone-500">Görsel eklendi</span>
-                <button
-                  onClick={() => setPendingImage(null)}
-                  title="Görseli kaldır"
-                  className="rounded-full px-1.5 text-[13px] text-stone-400 transition hover:text-rose-600"
-                >
-                  ×
-                </button>
+            {/* İliştirilen görsel önizlemeleri */}
+            {pendingImages.length > 0 && (
+              <div className="mb-1 flex flex-wrap items-center gap-2 px-1">
+                {pendingImages.map((src, i) => (
+                  <div key={i} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={src}
+                      alt={`eklenen görsel ${i + 1}`}
+                      className="h-12 w-12 rounded-lg object-cover ring-1 ring-orange-200"
+                    />
+                    <button
+                      onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+                      title="Görseli kaldır"
+                      className="absolute -right-1.5 -top-1.5 rounded-full bg-white px-1 text-[11px] leading-4 text-stone-400 shadow ring-1 ring-stone-200 transition hover:text-rose-600"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <span className="text-[11.5px] text-stone-500">
+                  {pendingImages.length > 1
+                    ? `${pendingImages.length} görsel eklendi`
+                    : "Görsel eklendi"}
+                </span>
               </div>
             )}
             <textarea
+              ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                autoGrow();
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -1056,7 +1186,7 @@ export default function RepoStudio({
             ) : (
               <button
                 onClick={send}
-                disabled={!input.trim() && !pendingImage}
+                disabled={!input.trim() && pendingImages.length === 0}
                 className="w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
               >
                 {mode === "plan" ? "Planla" : "Gönder"}
@@ -1065,6 +1195,19 @@ export default function RepoStudio({
           </div>
         </div>
       </section>
+
+      {/* Ayırıcı — sürükleyerek genişlik ayarlanır */}
+      <div
+        onMouseDown={() => {
+          draggingRef.current = true;
+          document.body.style.cursor = "col-resize";
+          document.body.style.userSelect = "none";
+        }}
+        title="Sürükleyerek genişliği ayarla"
+        className="group relative w-1.5 shrink-0 cursor-col-resize"
+      >
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-stone-200 transition group-hover:w-0.5 group-hover:bg-orange-300" />
+      </div>
 
       {/* SAĞ — önizleme / değişenler */}
       <section className="flex min-w-0 flex-1 flex-col pr-4">
@@ -1103,12 +1246,27 @@ export default function RepoStudio({
             </button>
           </div>
           {tab === "preview" && (
-            <button
-              onClick={() => setPreviewKey((k) => k + 1)}
-              className="rounded-xl bg-white px-3 py-1.5 text-[12.5px] font-medium text-stone-600 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50"
-            >
-              Yenile
-            </button>
+            <div className="flex items-center gap-2">
+              {shareUrl && (
+                <button
+                  onClick={async () => {
+                    const ok = await copyText(shareUrl);
+                    setLinkCopied(ok);
+                    if (ok) setTimeout(() => setLinkCopied(false), 2000);
+                  }}
+                  title="Önizleme linkini kopyala — aynı ağdaki herkes açabilir"
+                  className="rounded-xl bg-white px-3 py-1.5 text-[12.5px] font-medium text-stone-600 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50"
+                >
+                  {linkCopied ? "Kopyalandı ✓" : "🔗 Linki kopyala"}
+                </button>
+              )}
+              <button
+                onClick={() => setPreviewKey((k) => k + 1)}
+                className="rounded-xl bg-white px-3 py-1.5 text-[12.5px] font-medium text-stone-600 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50"
+              >
+                Yenile
+              </button>
+            </div>
           )}
         </header>
 

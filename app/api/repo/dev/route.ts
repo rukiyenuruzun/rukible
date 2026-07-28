@@ -5,6 +5,8 @@ import {
   getDevServer,
   stopDevServer,
   ensureFramePort,
+  ensureSharePort,
+  lanIPv4,
 } from "@/lib/devserver";
 import { REPO_MODE_ENABLED } from "@/lib/config";
 
@@ -50,6 +52,8 @@ export async function POST(req: Request) {
     status: ds.status,
     port: ds.port,
     framePort: ds.framePort,
+    sharePort: ds.sharePort,
+    lanIp: lanIPv4(),
     subdir: ds.subdir,
     framework: ds.framework,
     packageManager: ds.packageManager,
@@ -63,13 +67,17 @@ export async function GET(req: Request) {
     return new Response("Geçersiz proje kimliği.", { status: 400 });
   }
   const ds = getDevServer(projectId);
-  if (!ds) return Response.json({ status: "stopped", logs: [] });
-  // Rukible süreci yeniden başladıysa çerçeve proxy'si kaybolmuş olabilir.
+  // lanIp her durumda döner: statik projelerin paylaşım linki de buna muhtaç.
+  if (!ds) return Response.json({ status: "stopped", logs: [], lanIp: lanIPv4() });
+  // Rukible süreci yeniden başladıysa proxy'ler kaybolmuş olabilir.
   const framePort = ds.status === "ready" ? await ensureFramePort(projectId) : ds.framePort;
+  const sharePort = ds.status === "ready" ? await ensureSharePort(projectId) : ds.sharePort;
   return Response.json({
     status: ds.status,
     port: ds.port,
     framePort,
+    sharePort,
+    lanIp: lanIPv4(),
     subdir: ds.subdir,
     framework: ds.framework,
     error: ds.error,

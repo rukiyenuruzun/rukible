@@ -36,6 +36,37 @@ type Version = {
  * ya da başarısız, hiçbir mesaj silinmez. Supabase local'de bulunmadığından bu
  * yedek, dev sunucu yeniden başlasa bile sohbeti korur.
  */
+/** Bir mesaja iliştirilebilecek en fazla görsel sayısı. */
+const MAX_IMAGES = 4;
+
+/** Seçili stil sohbet/proje başına saklanır ("local" = projeye bağlanmamış sohbet). */
+const styleKey = (id: string | null) => `rukible_style_v1_${id ?? "local"}`;
+
+/**
+ * Panoya kopyalar. `navigator.clipboard` yalnızca güvenli bağlamda (https ya da
+ * localhost) var; Rukible IP üzerinden açıldığında eski yöntemle kopyalanır.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
 const CHAT_STORE_PREFIX = "rukible_chat_v1_";
 
 type ChatSnapshot = { messages: ChatMessage[]; html: string };
@@ -273,10 +304,11 @@ export default function Home() {
   const [mode, setMode] = useState<"build" | "plan">("build");
   // Plan modunda akan metni canlı göstermek için (bitince mesaja dönüşür).
   const [planDraft, setPlanDraft] = useState("");
-  // Sıradaki mesaja iliştirilecek görsel (ekran görüntüsü vb.) — data URL.
-  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  // Sıradaki mesaja iliştirilecek görseller (ekran görüntüsü vb.) — data URL.
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
   // Üretim stili (yeni sayfalar için). Düzenleme mevcut sayfanın diline uyar.
-  const [style, setStyle] = useState("muhendis");
+  // Varsayılan serbest; her sohbet kendi seçimini hatırlar (bkz. styleKey).
+  const [style, setStyle] = useState("serbest");
 
   // Kalıcılık
   const [dbReady, setDbReady] = useState(false);
@@ -318,17 +350,21 @@ export default function Home() {
   const draggingRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /** Görsel seçildiğinde: küçült, data URL'e çevir, sıradaki mesaja iliştir. */
+  /** Görsel(ler) seçildiğinde: küçült, data URL'e çevir, sıradaki mesaja iliştir. */
   async function handleFile(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // aynı dosyayı tekrar seçebilmek için sıfırla
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // aynı dosyaları tekrar seçebilmek için sıfırla
+    if (files.length === 0) return;
+    if (files.some((f) => !f.type.startsWith("image/"))) {
       setError("Sadece görsel (resim) eklenebilir.");
       return;
     }
     try {
-      setPendingImage(await fileToDataUrl(file));
+      const urls = await Promise.all(files.map((f) => fileToDataUrl(f)));
+      if (pendingImages.length + urls.length > MAX_IMAGES) {
+        setError(`En fazla ${MAX_IMAGES} görsel eklenebilir.`);
+      }
+      setPendingImages((prev) => [...prev, ...urls].slice(0, MAX_IMAGES));
     } catch {
       setError("Görsel işlenemedi.");
     }
@@ -360,7 +396,7 @@ export default function Home() {
   useEffect(() => {
     const saved = Number(localStorage.getItem("rukible_panel"));
     if (saved >= 300 && saved <= 720) setPanelWidth(saved);
-    const savedStyle = localStorage.getItem("rukible_style");
+    const savedStyle = localStorage.getItem(styleKey(null));
     if (savedStyle) setStyle(savedStyle);
   }, []);
 
@@ -484,6 +520,8 @@ export default function Home() {
     setVersions(data.versions ?? []);
     setShowProjects(false);
     setShareUrl(null);
+    // Bu sohbette en son seçilen stil (yoksa serbest).
+    setStyle(localStorage.getItem(styleKey(id)) ?? "serbest");
 
     // Sohbeti geri getir. Öncelik: DB (paylaşılan, her cihazda aynı) ve yerel
     // yedek arasından DAHA UZUN olan — böylece ne başka cihazdaki geçmiş ne de
@@ -563,8 +601,8 @@ export default function Home() {
   async function send(preset?: string, asBuild?: boolean) {
     const text = (preset ?? input).trim();
     // Görsel varsa metin olmadan da gönderilebilir.
-    const img = pendingImage;
-    if ((!text && !img) || streaming) return;
+    const imgs = pendingImages;
+    if ((!text && imgs.length === 0) || streaming) return;
 
     // "Uygula" düğmesi asBuild=true geçer: seçili mod ne olursa olsun Build çalışır.
     const activeMode: "build" | "plan" = asBuild ? "build" : mode;
@@ -572,7 +610,7 @@ export default function Home() {
     setError(null);
     setNotes([]);
     setCost(null);
-    setPendingImage(null); // iliştirildi; kutuyu boşalt
+    setPendingImages([]); // iliştirildi; kutuyu boşalt
     setStatus(
       activeMode === "plan"
         ? "Planlanıyor…"
@@ -586,14 +624,14 @@ export default function Home() {
     const apiMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
     const nextMessages: ChatMessage[] = [
       ...messages,
-      { role: "user", content: text || "📷 Görsel", hasImage: !!img },
+      { role: "user", content: text || "📷 Görsel", hasImage: imgs.length > 0 },
     ];
     setMessages(nextMessages);
 
     // Çoklu adım (numaralı istek) + ortada sayfa varsa: tek seferde değil, her
     // adımı ayrı küçük bir düzenleme olarak SIRAYLA uygula ve tek tek raporla.
     // Görsel eklendiyse bölme — görsel bağlamı isteğin tamamına uygulanmalı.
-    if (activeMode === "build" && html && !img) {
+    if (activeMode === "build" && html && imgs.length === 0) {
       const steps = parseSteps(text);
       if (steps.length >= 2) {
         await applyStepwise(steps, text, nextMessages);
@@ -617,7 +655,7 @@ export default function Home() {
           messages: apiMessages,
           currentHtml: html || undefined,
           mode: activeMode === "plan" ? "plan" : undefined,
-          image: img || undefined,
+          images: imgs.length ? imgs : undefined,
           style,
         }),
         signal: controller.signal,
@@ -751,7 +789,7 @@ export default function Home() {
               html,
               controller.signal,
               undefined,
-              img,
+              imgs,
             );
             if (retry.cost != null) {
               spent = (spent ?? 0) + retry.cost;
@@ -783,7 +821,7 @@ export default function Home() {
               html,
               controller.signal,
               "fulledit",
-              img,
+              imgs,
             );
             if (rewrite.cost != null) {
               spent = (spent ?? 0) + rewrite.cost;
@@ -861,7 +899,7 @@ export default function Home() {
     baseHtml: string,
     signal: AbortSignal,
     reqMode?: "fulledit",
-    image?: string | null,
+    images?: string[],
   ): Promise<{ content: string; cost: number | null }> {
     const res = await fetch("/api/generate", {
       method: "POST",
@@ -870,7 +908,7 @@ export default function Home() {
         messages: msgs,
         currentHtml: baseHtml || undefined,
         mode: reqMode,
-        image: image || undefined,
+        images: images?.length ? images : undefined,
       }),
       signal,
     });
@@ -1069,17 +1107,21 @@ export default function Home() {
       setError(await res.text());
       return;
     }
-    const { slug } = await res.json();
+    const { slug, lanIp } = await res.json();
     // Önizleme adresindeysek bile link asıl adresle üretilsin — aksi halde
-    // karşı taraf Vercel girişi ister.
-    const base = (SITE_URL || window.location.origin).replace(/\/+$/, "");
+    // karşı taraf Vercel girişi ister. Asıl adres tanımlı değilse adres çubuğu
+    // localhost olsa bile ağdakiler açabilsin diye sunucunun LAN IP'si kullanılır.
+    const port = window.location.port ? `:${window.location.port}` : "";
+    const base = (
+      SITE_URL || (lanIp ? `http://${lanIp}${port}` : window.location.origin)
+    ).replace(/\/+$/, "");
     setShareUrl(`${base}/p/${slug}`);
     setCopied(false);
   }
 
   async function copyShare() {
     if (!shareUrl) return;
-    await navigator.clipboard.writeText(shareUrl);
+    if (!(await copyText(shareUrl))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -1152,6 +1194,7 @@ export default function Home() {
     setMessages([]);
     setShareUrl(null);
     setShowProjects(false);
+    setStyle(localStorage.getItem(styleKey(null)) ?? "serbest");
   }
 
   return (
@@ -1460,7 +1503,7 @@ export default function Home() {
                 value={style}
                 onChange={(e) => {
                   setStyle(e.target.value);
-                  localStorage.setItem("rukible_style", e.target.value);
+                  localStorage.setItem(styleKey(project?.id ?? null), e.target.value);
                 }}
                 title="Üretim stili — yeni sayfalar bu stille üretilir"
                 className="rounded-full bg-white px-2 py-1 text-[11px] text-stone-600 outline-none ring-1 ring-stone-200"
@@ -1474,7 +1517,7 @@ export default function Home() {
               </select>
               <button
                 onClick={() => fileRef.current?.click()}
-                title="Görsel ekle (ekran görüntüsü) — model görüp anlar"
+                title="Görsel ekle (birden fazla seçilebilir) — model görüp anlar"
                 className="ml-auto rounded-full px-2.5 py-1 text-[13px] text-stone-400 transition hover:bg-orange-100 hover:text-stone-700"
               >
                 📎
@@ -1483,28 +1526,37 @@ export default function Home() {
                 ref={fileRef}
                 type="file"
                 accept="image/*"
+                multiple
                 onChange={handleFile}
                 className="hidden"
               />
             </div>
 
-            {/* İliştirilen görsel önizlemesi */}
-            {pendingImage && (
-              <div className="mb-1 flex items-center gap-2 px-1">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={pendingImage}
-                  alt="eklenen görsel"
-                  className="h-12 w-12 rounded-lg object-cover ring-1 ring-orange-200"
-                />
-                <span className="text-[11.5px] text-stone-500">Görsel eklendi</span>
-                <button
-                  onClick={() => setPendingImage(null)}
-                  title="Görseli kaldır"
-                  className="rounded-full px-1.5 text-[13px] text-stone-400 transition hover:text-rose-600"
-                >
-                  ×
-                </button>
+            {/* İliştirilen görsel önizlemeleri */}
+            {pendingImages.length > 0 && (
+              <div className="mb-1 flex flex-wrap items-center gap-2 px-1">
+                {pendingImages.map((src, i) => (
+                  <div key={i} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={src}
+                      alt={`eklenen görsel ${i + 1}`}
+                      className="h-12 w-12 rounded-lg object-cover ring-1 ring-orange-200"
+                    />
+                    <button
+                      onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+                      title="Görseli kaldır"
+                      className="absolute -right-1.5 -top-1.5 rounded-full bg-white px-1 text-[11px] leading-4 text-stone-400 shadow ring-1 ring-stone-200 transition hover:text-rose-600"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <span className="text-[11.5px] text-stone-500">
+                  {pendingImages.length > 1
+                    ? `${pendingImages.length} görsel eklendi`
+                    : "Görsel eklendi"}
+                </span>
               </div>
             )}
             <textarea
