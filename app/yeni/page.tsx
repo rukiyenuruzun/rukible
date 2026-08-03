@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { Logo, SLOGAN } from "../logo";
+import { ThemeToggle } from "../ThemeToggle";
 import { applyPatches } from "@/lib/patch";
 import { fileToDataUrl } from "@/lib/imageAttach";
 import { SITE_URL } from "@/lib/config";
@@ -1204,7 +1205,8 @@ export default function Home() {
         style={{ width: panelWidth }}
         className="flex shrink-0 flex-col overflow-hidden"
       >
-        <header className="px-7 py-6">
+        <header className="relative px-7 py-6">
+          <ThemeToggle className="absolute right-6 top-6 grid h-8 w-8 place-items-center rounded-full bg-white text-[15px] shadow-[0_1px_3px_rgba(120,80,60,0.12)] transition hover:bg-orange-50" />
           <div className="flex items-center gap-4">
             <Logo size={46} />
             <div className="leading-none">
@@ -1244,7 +1246,7 @@ export default function Home() {
                 <button
                   onClick={newProject}
                   title="Yeni sohbet başlat"
-                  className="shrink-0 rounded-xl bg-orange-400 px-3 py-2 text-[13px] font-medium text-white transition hover:bg-orange-500"
+                  className="shrink-0 rounded-xl bg-orange-400 px-3 py-2 text-[13px] font-medium text-[#fff] transition hover:bg-orange-500"
                 >
                   + Yeni
                 </button>
@@ -1279,7 +1281,7 @@ export default function Home() {
                       }}
                       className={`min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-left text-[12.5px] transition hover:bg-orange-100 ${
                         project?.id === p.id
-                          ? "bg-orange-400 font-medium text-white hover:bg-orange-500"
+                          ? "bg-orange-400 font-medium text-[#fff] hover:bg-orange-500"
                           : "text-stone-600 hover:text-stone-900"
                       }`}
                     >
@@ -1356,7 +1358,7 @@ export default function Home() {
                 <button
                   onClick={() => applyPlan(m.content)}
                   disabled={streaming}
-                  className="mt-3 rounded-lg bg-orange-400 px-3.5 py-1.5 text-[12px] font-medium text-white transition hover:bg-orange-500 disabled:opacity-40"
+                  className="mt-3 rounded-lg bg-orange-400 px-3.5 py-1.5 text-[12px] font-medium text-[#fff] transition hover:bg-orange-500 disabled:opacity-40"
                 >
                   Uygula →
                 </button>
@@ -1482,7 +1484,7 @@ export default function Home() {
                 title="Sayfayı değiştirir"
                 className={`rounded-full px-3 py-1 text-[11.5px] font-medium transition ${
                   mode === "build"
-                    ? "bg-orange-400 text-white"
+                    ? "bg-orange-400 text-[#fff]"
                     : "text-stone-400 hover:text-stone-600"
                 }`}
               >
@@ -1493,7 +1495,7 @@ export default function Home() {
                 title="Sayfaya dokunmadan ne yapılacağını konuşur"
                 className={`rounded-full px-3 py-1 text-[11.5px] font-medium transition ${
                   mode === "plan"
-                    ? "bg-orange-400 text-white"
+                    ? "bg-orange-400 text-[#fff]"
                     : "text-stone-400 hover:text-stone-600"
                 }`}
               >
@@ -1591,7 +1593,7 @@ export default function Home() {
               <button
                 onClick={() => send()}
                 disabled={!input.trim()}
-                className="w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
+                className="w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-[#fff] transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
               >
                 {mode === "plan" ? "Planla" : "Gönder"}
               </button>
@@ -1620,7 +1622,7 @@ export default function Home() {
             <button
               onClick={() => setMobileView(false)}
               className={`rounded-full px-3 py-1 transition ${
-                !mobileView ? "bg-orange-400 text-white" : "text-stone-400 hover:text-stone-600"
+                !mobileView ? "bg-orange-400 text-[#fff]" : "text-stone-400 hover:text-stone-600"
               }`}
             >
               Masaüstü
@@ -1628,7 +1630,7 @@ export default function Home() {
             <button
               onClick={() => setMobileView(true)}
               className={`rounded-full px-3 py-1 transition ${
-                mobileView ? "bg-orange-400 text-white" : "text-stone-400 hover:text-stone-600"
+                mobileView ? "bg-orange-400 text-[#fff]" : "text-stone-400 hover:text-stone-600"
               }`}
             >
               Mobil
@@ -1644,7 +1646,7 @@ export default function Home() {
                 <button
                   onClick={() => finishEdit(true)}
                   disabled={saving}
-                  className="rounded-xl bg-orange-400 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-200"
+                  className="rounded-xl bg-orange-400 px-3.5 py-1.5 text-[12.5px] font-medium text-[#fff] transition hover:bg-orange-500 disabled:bg-stone-200"
                 >
                   {saving ? "Kaydediliyor…" : "Kaydet"}
                 </button>
@@ -1722,7 +1724,7 @@ export default function Home() {
                   key={v.id}
                   className={`group flex items-center rounded-lg transition ${
                     v.id === versionId
-                      ? "bg-orange-400 text-white"
+                      ? "bg-orange-400 text-[#fff]"
                       : "bg-white text-stone-600 hover:bg-orange-100"
                   }`}
                 >
@@ -1740,7 +1742,7 @@ export default function Home() {
                     title="Bu versiyonu sil"
                     className={`px-1.5 text-[13px] leading-none opacity-0 transition group-hover:opacity-100 ${
                       v.id === versionId
-                        ? "text-white/70 hover:text-white"
+                        ? "text-[#fff]/70 hover:text-[#fff]"
                         : "text-stone-400 hover:text-rose-600"
                     }`}
                   >

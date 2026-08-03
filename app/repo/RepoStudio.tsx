@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { Logo, SLOGAN } from "../logo";
+import { ThemeToggle } from "../ThemeToggle";
 import { readNdjson } from "@/lib/streamChat";
 import { downloadText } from "@/lib/download";
 import { fileToDataUrl } from "@/lib/imageAttach";
@@ -132,6 +133,8 @@ export default function RepoStudio({
   const [previewPath, setPreviewPath] = useState("");
   const [tree, setTree] = useState<TreeEntry[]>([]);
   const [previewKey, setPreviewKey] = useState(0);
+  /** Önizleme genişliği: mobil (dar) mı masaüstü (tam) mü. */
+  const [mobileView, setMobileView] = useState(false);
   /** "Linki kopyala" geri bildirimi (kopyalandıktan sonra kısa süre ✓). */
   const [linkCopied, setLinkCopied] = useState(false);
 
@@ -770,6 +773,7 @@ export default function RepoStudio({
   if (!projectId) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#fff7f3] px-6 text-stone-700">
+        <ThemeToggle className="fixed right-5 top-5 grid h-9 w-9 place-items-center rounded-full bg-white text-[16px] shadow-[0_1px_3px_rgba(120,80,60,0.12)] transition hover:bg-orange-50" />
         <div className="w-full max-w-[440px]">
           <div className="mb-8 flex flex-col items-center text-center">
             <Logo size={92} />
@@ -796,7 +800,7 @@ export default function RepoStudio({
             <button
               onClick={startClone}
               disabled={cloning || !cloneUrl.trim()}
-              className="mt-2 w-full rounded-xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
+              className="mt-2 w-full rounded-xl bg-orange-400 py-2.5 text-[13px] font-medium text-[#fff] transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
             >
               {cloning ? "Klonlanıyor…" : "Klonla ve başla"}
             </button>
@@ -929,6 +933,12 @@ export default function RepoStudio({
           : ""
       : "";
 
+  // Önizleme iframe'i şu an gerçekten görünüyor mu (statik giriş ya da hazır dev
+  // sunucusu). Sadece o zaman Masaüstü/Mobil geçişini göstermek anlamlı.
+  const previewLive = Boolean(
+    (previewPath && hasStaticEntry(tree)) || (devStatus === "ready" && devPort),
+  );
+
   return (
     <main className="flex h-screen bg-[#fff7f3] text-stone-700">
       {/* SOL — sohbet */}
@@ -951,6 +961,7 @@ export default function RepoStudio({
             >
               ← Başa dön
             </Link>
+            <ThemeToggle className="grid h-8 w-8 place-items-center rounded-xl bg-white text-[14px] shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50" />
             <button
               onClick={() => {
                 clearDevPoll();
@@ -1009,7 +1020,7 @@ export default function RepoStudio({
                 <button
                   onClick={() => applyPlan(m.content)}
                   disabled={streaming}
-                  className="mt-3 rounded-lg bg-orange-400 px-3.5 py-1.5 text-[12px] font-medium text-white transition hover:bg-orange-500 disabled:opacity-40"
+                  className="mt-3 rounded-lg bg-orange-400 px-3.5 py-1.5 text-[12px] font-medium text-[#fff] transition hover:bg-orange-500 disabled:opacity-40"
                 >
                   Uygula →
                 </button>
@@ -1064,7 +1075,7 @@ export default function RepoStudio({
                   onClick={() => setMode("build")}
                   className={`rounded-full px-3 py-1 transition ${
                     mode === "build"
-                      ? "bg-orange-400 text-white"
+                      ? "bg-orange-400 text-[#fff]"
                       : "text-stone-400 hover:text-stone-600"
                   }`}
                 >
@@ -1074,7 +1085,7 @@ export default function RepoStudio({
                   onClick={() => setMode("plan")}
                   className={`rounded-full px-3 py-1 transition ${
                     mode === "plan"
-                      ? "bg-orange-400 text-white"
+                      ? "bg-orange-400 text-[#fff]"
                       : "text-stone-400 hover:text-stone-600"
                   }`}
                 >
@@ -1187,7 +1198,7 @@ export default function RepoStudio({
               <button
                 onClick={send}
                 disabled={!input.trim() && pendingImages.length === 0}
-                className="w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
+                className="w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-[#fff] transition hover:bg-orange-500 disabled:bg-stone-100 disabled:text-stone-300"
               >
                 {mode === "plan" ? "Planla" : "Gönder"}
               </button>
@@ -1217,7 +1228,7 @@ export default function RepoStudio({
               onClick={() => setTab("preview")}
               className={`rounded-full px-3 py-1 transition ${
                 tab === "preview"
-                  ? "bg-orange-400 text-white"
+                  ? "bg-orange-400 text-[#fff]"
                   : "text-stone-400 hover:text-stone-600"
               }`}
             >
@@ -1227,7 +1238,7 @@ export default function RepoStudio({
               onClick={() => setTab("files")}
               className={`rounded-full px-3 py-1 transition ${
                 tab === "files"
-                  ? "bg-orange-400 text-white"
+                  ? "bg-orange-400 text-[#fff]"
                   : "text-stone-400 hover:text-stone-600"
               }`}
             >
@@ -1238,7 +1249,7 @@ export default function RepoStudio({
               onClick={() => setTab("changes")}
               className={`rounded-full px-3 py-1 transition ${
                 tab === "changes"
-                  ? "bg-orange-400 text-white"
+                  ? "bg-orange-400 text-[#fff]"
                   : "text-stone-400 hover:text-stone-600"
               }`}
             >
@@ -1247,6 +1258,30 @@ export default function RepoStudio({
           </div>
           {tab === "preview" && (
             <div className="flex items-center gap-2">
+              {previewLive && (
+                <div className="flex gap-1 rounded-full bg-white/70 p-1 text-xs">
+                  <button
+                    onClick={() => setMobileView(false)}
+                    className={`rounded-full px-3 py-1 transition ${
+                      !mobileView
+                        ? "bg-orange-400 text-[#fff]"
+                        : "text-stone-400 hover:text-stone-600"
+                    }`}
+                  >
+                    Masaüstü
+                  </button>
+                  <button
+                    onClick={() => setMobileView(true)}
+                    className={`rounded-full px-3 py-1 transition ${
+                      mobileView
+                        ? "bg-orange-400 text-[#fff]"
+                        : "text-stone-400 hover:text-stone-600"
+                    }`}
+                  >
+                    Mobil
+                  </button>
+                </div>
+              )}
               {shareUrl && (
                 <button
                   onClick={async () => {
@@ -1273,13 +1308,23 @@ export default function RepoStudio({
         <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-white shadow-[0_1px_3px_rgba(120,80,60,0.08)]">
           {tab === "preview" ? (
             previewPath && hasStaticEntry(tree) ? (
-              <iframe
-                key={previewKey}
-                src={`/api/preview/${projectId}/${previewPath}`}
-                sandbox="allow-scripts allow-forms allow-popups"
-                className="h-full w-full border-0"
-                title="Önizleme"
-              />
+              <div
+                className={`flex h-full ${
+                  mobileView ? "justify-center overflow-auto bg-stone-100/60 p-4" : ""
+                }`}
+              >
+                <iframe
+                  key={previewKey}
+                  src={`/api/preview/${projectId}/${previewPath}`}
+                  sandbox="allow-scripts allow-forms allow-popups"
+                  className={`border-0 transition-all ${
+                    mobileView
+                      ? "h-full w-[390px] shrink-0 rounded-2xl shadow-[0_2px_16px_rgba(120,80,60,0.12)]"
+                      : "h-full w-full"
+                  }`}
+                  title="Önizleme"
+                />
+              </div>
             ) : (
               <div className="flex h-full flex-col">
                 {/* dev sunucusu araç çubuğu */}
@@ -1318,7 +1363,7 @@ export default function RepoStudio({
                     ) : (
                       <button
                         onClick={startDev}
-                        className="rounded-lg bg-orange-400 px-2.5 py-1 text-[11.5px] font-medium text-white transition hover:bg-orange-500"
+                        className="rounded-lg bg-orange-400 px-2.5 py-1 text-[11.5px] font-medium text-[#fff] transition hover:bg-orange-500"
                       >
                         ▸ Önizlemeyi başlat
                       </button>
@@ -1328,12 +1373,24 @@ export default function RepoStudio({
 
                 {/* gövde */}
                 {devStatus === "ready" && devPort ? (
-                  <iframe
-                    key={previewKey}
-                    src={previewSrc}
-                    className="min-h-0 w-full flex-1 border-0"
-                    title="Önizleme"
-                  />
+                  <div
+                    className={`flex min-h-0 flex-1 ${
+                      mobileView
+                        ? "justify-center overflow-auto bg-stone-100/60 p-4"
+                        : ""
+                    }`}
+                  >
+                    <iframe
+                      key={previewKey}
+                      src={previewSrc}
+                      className={`min-h-0 border-0 transition-all ${
+                        mobileView
+                          ? "h-full w-[390px] shrink-0 rounded-2xl shadow-[0_2px_16px_rgba(120,80,60,0.12)]"
+                          : "w-full flex-1"
+                      }`}
+                      title="Önizleme"
+                    />
+                  </div>
                 ) : devStatus === "installing" || devStatus === "starting" ? (
                   <div className="flex min-h-0 flex-1 flex-col">
                     <p className="px-4 pt-3 text-[13px] text-stone-500">
@@ -1341,7 +1398,7 @@ export default function RepoStudio({
                         ? "Projenin bağımlılıkları kuruluyor (ilk seferde birkaç dakika sürebilir)…"
                         : "Dev sunucusu başlatılıyor, hazır olunca site burada görünecek…"}
                     </p>
-                    <pre className="mx-4 mb-4 mt-2 min-h-0 flex-1 overflow-auto rounded-lg bg-stone-900/95 p-3 text-[11px] leading-relaxed text-stone-200">
+                    <pre className="mx-4 mb-4 mt-2 min-h-0 flex-1 overflow-auto rounded-lg bg-[#0d0a16]/95 p-3 text-[11px] leading-relaxed text-[#e7e5e4]">
                       {devLogs.join("\n") || "…"}
                     </pre>
                   </div>
@@ -1363,7 +1420,7 @@ export default function RepoStudio({
                       </p>
                       <button
                         onClick={startDev}
-                        className="mt-4 rounded-xl bg-orange-400 px-4 py-2 text-[13px] font-medium text-white transition hover:bg-orange-500"
+                        className="mt-4 rounded-xl bg-orange-400 px-4 py-2 text-[13px] font-medium text-[#fff] transition hover:bg-orange-500"
                       >
                         ▸ Önizlemeyi başlat
                       </button>
@@ -1371,7 +1428,7 @@ export default function RepoStudio({
                         <p className="mt-3 text-[12px] text-rose-600">{devError}</p>
                       )}
                       {devLogs.length > 0 && (
-                        <pre className="mt-3 max-h-48 overflow-auto rounded-lg bg-stone-900/95 p-3 text-left text-[11px] leading-relaxed text-stone-200">
+                        <pre className="mt-3 max-h-48 overflow-auto rounded-lg bg-[#0d0a16]/95 p-3 text-left text-[11px] leading-relaxed text-[#e7e5e4]">
                           {devLogs.join("\n")}
                         </pre>
                       )}
@@ -1447,7 +1504,7 @@ export default function RepoStudio({
                         <button
                           onClick={saveFile}
                           disabled={editBusy || editContent === editOriginal}
-                          className="rounded-lg bg-orange-400 px-2.5 py-1 text-[11.5px] font-medium text-white transition hover:bg-orange-500 disabled:opacity-40"
+                          className="rounded-lg bg-orange-400 px-2.5 py-1 text-[11.5px] font-medium text-[#fff] transition hover:bg-orange-500 disabled:opacity-40"
                         >
                           {editBusy ? "Kaydediliyor…" : "Kaydet"}
                         </button>
@@ -1469,7 +1526,7 @@ export default function RepoStudio({
                         }
                       }}
                       spellCheck={false}
-                      className="min-h-0 flex-1 resize-none bg-stone-900/95 p-3 font-[family-name:var(--font-mono)] text-[12px] leading-relaxed text-stone-100 outline-none"
+                      className="min-h-0 flex-1 resize-none bg-[#0d0a16]/95 p-3 font-[family-name:var(--font-mono)] text-[12px] leading-relaxed text-[#f5f5f4] outline-none"
                     />
                   </>
                 ) : (
@@ -1510,7 +1567,7 @@ export default function RepoStudio({
                 <button
                   onClick={commitPush}
                   disabled={pushBusy || streaming || changes.length === 0}
-                  className="shrink-0 rounded-lg bg-orange-400 px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-orange-500 disabled:opacity-40"
+                  className="shrink-0 rounded-lg bg-orange-400 px-3 py-1.5 text-[12px] font-medium text-[#fff] transition hover:bg-orange-500 disabled:opacity-40"
                 >
                   {pushBusy ? "Gönderiliyor…" : "Commit & Push"}
                 </button>

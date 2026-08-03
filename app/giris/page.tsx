@@ -58,7 +58,7 @@ export default async function Giris({
 
         <button
           type="submit"
-          className="mt-2 w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-white transition hover:bg-orange-500"
+          className="mt-2 w-full rounded-2xl bg-orange-400 py-2.5 text-[13px] font-medium text-[#fff] transition hover:bg-orange-500"
         >
           Gir
         </button>

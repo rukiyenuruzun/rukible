@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Logo, SLOGAN } from "./logo";
+import { ThemeToggle } from "./ThemeToggle";
 
 /**
  * AÇILIŞ EKRANI (kök): iki yol.
@@ -11,6 +12,7 @@ import { Logo, SLOGAN } from "./logo";
 export default function Acilis() {
   return (
     <main className="grid min-h-screen place-items-center bg-[#fff7f3] px-6 text-stone-700">
+      <ThemeToggle className="fixed right-5 top-5 grid h-9 w-9 place-items-center rounded-full bg-white text-[16px] shadow-[0_1px_3px_rgba(120,80,60,0.12)] transition hover:bg-orange-50" />
       <div className="w-full max-w-[720px]">
         <div className="mb-9 flex flex-col items-center text-center">
           <Logo size={104} />

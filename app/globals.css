@@ -1,8 +1,13 @@
 @import "tailwindcss";
 
+/* Manuel koyu tema: <html data-theme="dark"> iken `dark:` varyantı ve aşağıdaki
+   değişken yeniden tanımları devreye girer. Temayı app/layout.tsx içindeki
+   head script'i (localStorage → sistem tercihi) boyamadan ÖNCE ayarlar. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fff7f3;
+  --foreground: #292524;
 }
 
 @theme inline {
@@ -12,15 +17,69 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ——— KOYU TEMA (koyu MOR) ———
+   Tailwind v4 utility'leri renkleri var(--color-*) üzerinden okur. Nötr rampayı
+   (stone), beyazı ve açık turuncu TİNT'leri burada yeniden tanımlayınca
+   bg-white / text-stone-* / border-stone-* / bg-orange-50/100 JSX'e hiç
+   dokunmadan koyu mora döner. Zemin SİYAH DEĞİL, koyu mor. Canlı turuncu vurgu
+   (orange-400/500 buton ve aksan yazısı) bilerek korunur — mor üstünde patlar.
+   Çift amaçlı birkaç sınıf (turuncu buton yazısı text-white, terminal zemini
+   bg-stone-900) ramp ters dönünce bozulmasın diye JSX'te sabit renge
+   sabitlendi. */
+[data-theme="dark"] {
+  --background: #14101f;
+  --foreground: #e7e1f3;
+
+  /* Yüzey/panel (bg-white). Sayfa zemininden belirgin bir tık açık mor. */
+  --color-white: #201a30;
+
+  /* Nötr rampa — MOR tonlu griler. Büyük numara = AÇIK (ışıkta tam tersi).
+     Böylece text-stone-700 açık lavanta yazı, bg-stone-100 koyu mor dolgu olur;
+     yazı kontrastı yüksek tutuldu (okunurluk şart). */
+  --color-stone-50: #1a1428;
+  --color-stone-100: #241c33;
+  --color-stone-200: #332a45;
+  --color-stone-300: #4a3f60;
+  --color-stone-400: #9a8fb2;
+  --color-stone-500: #b3a8c9;
+  --color-stone-600: #cbc2dc;
+  --color-stone-700: #e6e0f2;
+  --color-stone-800: #f0ebf9;
+  --color-stone-900: #faf7ff;
+
+  /* Açık turuncu tint'ler (dolgu/hover/balon) → koyu mor dolgular.
+     Canlı turuncu (400/500) DEĞİŞMEZ; sadece aydınlık tint'ler koyulaşır. */
+  --color-orange-50: #1f1830;
+  --color-orange-100: #2b2140;
+  --color-orange-200: #3d3157;
+  --color-orange-300: #6a5a8a;
+
+  /* Durum renkleri: açık zemin tonlarını koyulaştır, yazı tonlarını aç. */
+  --color-rose-50: #2a1420;
+  --color-rose-100: #3a1a2a;
+  --color-rose-200: #4d2238;
+  --color-rose-600: #fb7185;
+  --color-rose-700: #f43f5e;
+  --color-emerald-50: #12261f;
+  --color-emerald-100: #18332a;
+  --color-emerald-600: #34d399;
+  --color-emerald-700: #10b981;
+  --color-emerald-900: #a7f3d0;
+  --color-amber-100: #322612;
+  --color-amber-600: #fbbf24;
+  --color-amber-700: #f59e0b;
+}
+
+/* Sayfa/giriş zeminleri arbitrary değer (#fff7f3) olduğundan var üzerinden
+   dönmez; doğrudan hedefle (Tailwind'in ürettiği kaçışlı seçicilerle). */
+[data-theme="dark"] .bg-\[\#fff7f3\] {
+  background-color: #14101f;
+}
+[data-theme="dark"] .bg-\[\#fff7f3\]\/70 {
+  background-color: rgba(20, 16, 31, 0.72);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }
