@@ -7,6 +7,7 @@ import { ThemeToggle } from "../ThemeToggle";
 import { readNdjson } from "@/lib/streamChat";
 import { downloadText } from "@/lib/download";
 import { fileToDataUrl } from "@/lib/imageAttach";
+import { type SectionSelection } from "@/lib/sectionPicker";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -173,6 +174,9 @@ export default function RepoStudio({
   const [previewKey, setPreviewKey] = useState(0);
   /** Önizleme genişliği: mobil (dar) mı masaüstü (tam) mü. */
   const [mobileView, setMobileView] = useState(false);
+  /** Bölüm seçme modu: açıkken önizlemede tıklanan bölüm seçilir. */
+  const [pickMode, setPickMode] = useState(false);
+  const [selection, setSelection] = useState<SectionSelection | null>(null);
   /** "Linki kopyala" geri bildirimi (kopyalandıktan sonra kısa süre ✓). */
   const [linkCopied, setLinkCopied] = useState(false);
 
@@ -242,6 +246,9 @@ export default function RepoStudio({
   const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const previewRef = useRef<HTMLIFrameElement>(null);
+  // Gönderim boyunca seçili bölümü taşır (state'i hemen temizleyip rozeti kaldırırız).
+  const selectionRef = useRef<SectionSelection | null>(null);
 
   /** Yazdıkça çubuğu büyütür, belli bir yükseklikten sonra kendi içinde kaydırır. */
   function autoGrow() {
@@ -340,6 +347,34 @@ export default function RepoStudio({
       await loadVersions(projectId);
     })();
   }, [tab, projectId, loadVersions]);
+
+  // Önizlemede seçilen bölümü dinle.
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (e.data?.type !== "rukible:selected") return;
+      const d = e.data as SectionSelection;
+      setSelection({
+        tag: d.tag,
+        label: d.label,
+        selector: d.selector,
+        text: d.text,
+        html: d.html,
+      });
+      // Seçim yapıldı: modu kapat, kullanıcı isteğini yazsın.
+      setPickMode(false);
+      previewRef.current?.contentWindow?.postMessage("rukible:pick:off", "*");
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  // Seç modunu önizlemeye ilet. Önizleme sekmesinden çıkınca da kapat.
+  useEffect(() => {
+    previewRef.current?.contentWindow?.postMessage(
+      pickMode && tab === "preview" ? "rukible:pick:on" : "rukible:pick:off",
+      "*",
+    );
+  }, [pickMode, tab]);
 
   const clearDevPoll = useCallback(() => {
     if (devPollRef.current) {
@@ -706,6 +741,7 @@ export default function RepoStudio({
           mode: useMode,
           style,
           images: imgs?.length ? imgs : undefined,
+          selection: selectionRef.current ?? undefined,
           messages: apiMessages.map((m) => ({ role: m.role, content: m.content })),
         }),
         signal: controller.signal,
@@ -783,6 +819,7 @@ export default function RepoStudio({
     } finally {
       setStreaming(false);
       abortRef.current = null;
+      selectionRef.current = null; // seçim bu gönderimle tüketildi
     }
   }
 
@@ -790,6 +827,9 @@ export default function RepoStudio({
     const text = input.trim();
     const imgs = pendingImages;
     if (!text && imgs.length === 0) return;
+    // Seçili bölümü bu gönderim için sabitle, rozeti hemen temizle.
+    selectionRef.current = selection;
+    setSelection(null);
     setInput("");
     requestAnimationFrame(autoGrow); // gönderdikten sonra çubuk eski boyuna dönsün
     setPendingImages([]); // iliştirildi; kutuyu boşalt
@@ -1387,6 +1427,22 @@ export default function RepoStudio({
                 </span>
               </div>
             )}
+            {selection && (
+              <div className="mb-1 flex items-center gap-2 rounded-xl bg-orange-100/70 px-2.5 py-1.5">
+                <span className="text-[12px]">🎯</span>
+                <span className="min-w-0 flex-1 truncate text-[11.5px] text-stone-600">
+                  Seçili: <span className="font-medium">{selection.label}</span>
+                  {selection.text ? ` · "${selection.text.slice(0, 40)}"` : ""}
+                </span>
+                <button
+                  onClick={() => setSelection(null)}
+                  title="Seçimi temizle (tüm sayfaya uygula)"
+                  className="shrink-0 rounded px-1 text-[13px] leading-none text-stone-400 transition hover:text-rose-600"
+                >
+                  ×
+                </button>
+              </div>
+            )}
             <textarea
               ref={inputRef}
               value={input}
@@ -1513,6 +1569,19 @@ export default function RepoStudio({
                   </button>
                 </div>
               )}
+              {previewLive && (
+                <button
+                  onClick={() => setPickMode((v) => !v)}
+                  title="Bir bölüm seç; sonraki istek yalnız o bölüme uygulanır"
+                  className={`rounded-xl px-3 py-1.5 text-[12.5px] font-medium transition ${
+                    pickMode
+                      ? "bg-orange-400 text-[#fff] hover:bg-orange-500"
+                      : "bg-white text-stone-600 shadow-[0_1px_2px_rgba(120,80,60,0.06)] hover:bg-orange-50"
+                  }`}
+                >
+                  {pickMode ? "🎯 Seçiliyor…" : "🎯 Seç"}
+                </button>
+              )}
               {shareUrl && (
                 <button
                   onClick={async () => {
@@ -1546,8 +1615,16 @@ export default function RepoStudio({
               >
                 <iframe
                   key={previewKey}
+                  ref={previewRef}
                   src={`/api/preview/${projectId}/${previewPath}`}
                   sandbox="allow-scripts allow-forms allow-popups"
+                  onLoad={() => {
+                    if (pickMode)
+                      previewRef.current?.contentWindow?.postMessage(
+                        "rukible:pick:on",
+                        "*",
+                      );
+                  }}
                   className={`border-0 transition-all ${
                     mobileView
                       ? "h-full w-[390px] shrink-0 rounded-2xl shadow-[0_2px_16px_rgba(120,80,60,0.12)]"
@@ -1613,7 +1690,15 @@ export default function RepoStudio({
                   >
                     <iframe
                       key={previewKey}
+                      ref={previewRef}
                       src={previewSrc}
+                      onLoad={() => {
+                        if (pickMode)
+                          previewRef.current?.contentWindow?.postMessage(
+                            "rukible:pick:on",
+                            "*",
+                          );
+                      }}
                       className={`min-h-0 border-0 transition-all ${
                         mobileView
                           ? "h-full w-[390px] shrink-0 rounded-2xl shadow-[0_2px_16px_rgba(120,80,60,0.12)]"

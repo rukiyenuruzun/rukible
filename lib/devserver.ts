@@ -7,6 +7,7 @@ import path from "node:path";
 import os from "node:os";
 import { randomBytes } from "node:crypto";
 import { safeAbsPath } from "@/lib/workspace";
+import { injectPicker } from "@/lib/sectionPicker";
 import type { FrontendTarget } from "@/lib/detectFrontend";
 
 /**
@@ -152,7 +153,16 @@ function startFrameProxy(projectId: string, devPort: number): Promise<number> {
 
   const server = http.createServer((req, res) => {
     const upstream = http.request(
-      { host: "127.0.0.1", port: devPort, path: req.url, method: req.method, headers: req.headers },
+      {
+        host: "127.0.0.1",
+        port: devPort,
+        path: req.url,
+        method: req.method,
+        // HTML yanıtlarına bölüm seçici script'ini gömebilmek için sıkıştırmayı
+        // kapat (yerel önizleme; bant genişliği sorun değil). HMR/upgrade ayrı
+        // yoldan (server.on("upgrade")) geçtiği için etkilenmez.
+        headers: { ...req.headers, "accept-encoding": "identity" },
+      },
       (up) => {
         const headers: http.OutgoingHttpHeaders = { ...up.headers };
         delete headers["x-frame-options"];
@@ -162,6 +172,34 @@ function startFrameProxy(projectId: string, devPort: number): Promise<number> {
         const loc = headers["location"];
         const port = (server.address() as AddressInfo | null)?.port;
         if (typeof loc === "string" && port) headers["location"] = rewriteLocation(loc, port);
+
+        // HTML ise: gövdeyi toplayıp seçici script'ini göm (canlı önizlemede de
+        // "Seç" çalışsın). Diğer her şey (js/css/HMR) ham akıtılır — hız/HMR bozulmaz.
+        const ctype = String(up.headers["content-type"] ?? "");
+        if (ctype.includes("text/html")) {
+          const chunks: Buffer[] = [];
+          up.on("data", (c: Buffer) => chunks.push(c));
+          up.on("end", () => {
+            const out = Buffer.from(
+              injectPicker(Buffer.concat(chunks).toString("utf8")),
+              "utf8",
+            );
+            delete headers["content-length"];
+            delete headers["transfer-encoding"];
+            headers["content-length"] = String(out.length);
+            if (!res.headersSent) res.writeHead(up.statusCode ?? 502, headers);
+            res.end(out);
+          });
+          up.on("error", () => {
+            try {
+              res.end();
+            } catch {
+              /* yoksay */
+            }
+          });
+          return;
+        }
+
         res.writeHead(up.statusCode ?? 502, headers);
         up.pipe(res);
       },

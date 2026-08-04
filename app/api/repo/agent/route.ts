@@ -19,6 +19,7 @@ import {
 import { isValidProjectId, projectDir, workdirExists } from "@/lib/workspace";
 import { withRepoLock } from "@/lib/repoLock";
 import { commitAllIfChanged } from "@/lib/git";
+import { selectionInstruction, type SectionSelection } from "@/lib/sectionPicker";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +52,7 @@ export async function POST(req: Request) {
     mode?: string;
     style?: string;
     images?: string[];
+    selection?: SectionSelection;
   };
   try {
     body = await req.json();
@@ -114,10 +116,16 @@ export async function POST(req: Request) {
           "mesajdaki sıra), uzantıyı formatına uygun seç ve gereken yerde bu " +
           "dosyaya referans ver.")
     : "";
+  // Kullanıcı önizlemede bir bölüm seçtiyse: ajana yalnız o bölümü değiştirmesini
+  // ve ilgili kaynağı seçili metin/HTML'i grep'leyerek bulmasını söyle.
+  const selectionNote = body.selection
+    ? `\n\n${selectionInstruction(body.selection)}`
+    : "";
   const systemPrompt =
     (isPlan ? AGENT_PLAN_PROMPT : AGENT_SYSTEM_PROMPT) +
     (styleNote && !isPlan ? `\n\nTASARIM TERCİHİ (görsel değişikliklerde): ${styleNote}` : "") +
-    imageNote;
+    imageNote +
+    selectionNote;
   if (!isValidProjectId(projectId)) {
     return new Response("Geçersiz proje kimliği.", { status: 400 });
   }

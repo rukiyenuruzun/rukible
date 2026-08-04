@@ -6,6 +6,7 @@ import {
   WorkdirError,
 } from "@/lib/workspace";
 import { rewriteHtml, rewriteCss } from "@/lib/previewRewrite";
+import { injectPicker } from "@/lib/sectionPicker";
 import { REPO_MODE_ENABLED } from "@/lib/config";
 
 export const runtime = "nodejs";
@@ -86,7 +87,7 @@ export async function GET(
     const type = contentType(segments.join("/"));
 
     if (type.startsWith("text/html")) {
-      const body = rewriteHtml(buffer.toString("utf8"), base);
+      const body = injectPicker(rewriteHtml(buffer.toString("utf8"), base));
       return new Response(body, {
         headers: { "Content-Type": type, ...NO_STORE },
       });

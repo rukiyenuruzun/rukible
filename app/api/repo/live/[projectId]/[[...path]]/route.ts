@@ -1,6 +1,7 @@
 import { isValidProjectId } from "@/lib/workspace";
 import { previewPort } from "@/lib/devserver";
 import { rewriteHtml, rewriteCss } from "@/lib/previewRewrite";
+import { injectPicker } from "@/lib/sectionPicker";
 import { REPO_MODE_ENABLED } from "@/lib/config";
 
 export const runtime = "nodejs";
@@ -140,8 +141,9 @@ async function handle(
   if (ctype.includes("text/html")) {
     const raw = await upstream.text();
     // basePath modunda uygulama zaten proxy ön ekini kullanır → yeniden yazma.
-    const body = bp ? raw : rewriteHtml(raw, base);
-    return new Response(body, { status, headers: respHeaders });
+    const rewritten = bp ? raw : rewriteHtml(raw, base);
+    // Bölüm seçici script'i her iki modda da gömülür (atıl durur).
+    return new Response(injectPicker(rewritten), { status, headers: respHeaders });
   }
   if (ctype.includes("text/css")) {
     const raw = await upstream.text();

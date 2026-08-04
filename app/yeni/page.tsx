@@ -6,6 +6,7 @@ import { Logo, SLOGAN } from "../logo";
 import { ThemeToggle } from "../ThemeToggle";
 import { applyPatches } from "@/lib/patch";
 import { fileToDataUrl } from "@/lib/imageAttach";
+import { SECTION_PICKER_JS, type SectionSelection } from "@/lib/sectionPicker";
 import { SITE_URL } from "@/lib/config";
 
 type ChatMessage = {
@@ -258,7 +259,9 @@ document.addEventListener('submit', function (e) { e.preventDefault(); }, true);
 })();
 </script>`;
 
-  const inject = editMode ? guard + editor : guard;
+  // Bölüm seçici (her zaman gömülür, atıl durur; "Seç" modunda devreye girer).
+  const picker = `<script data-rukible="1">${SECTION_PICKER_JS}</script>`;
+  const inject = (editMode ? guard + editor : guard) + picker;
 
   // </head> varsa oraya, yoksa başa ekle.
   return html.includes("</head>")
@@ -339,6 +342,11 @@ export default function Home() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Bölüm seçme: "Seç" modu açıkken önizlemede tıklanan bölüm buraya düşer ve
+  // sonraki istek yalnız o bölüme uygulanır.
+  const [pickMode, setPickMode] = useState(false);
+  const [selection, setSelection] = useState<SectionSelection | null>(null);
+
   /**
    * Elle yapılan düzenlemeler burada birikir — state'te DEĞİL.
    * State'e yazsak önizleme her tuş vuruşunda yeniden yüklenir ve imleç kaybolur.
@@ -350,6 +358,9 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
   const draggingRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const previewRef = useRef<HTMLIFrameElement>(null);
+  // Gönderim boyunca (yama + tam-yazım yedeği + adım adım) seçili bölümü taşır.
+  const selectionRef = useRef<SectionSelection | null>(null);
 
   /** Görsel(ler) seçildiğinde: küçült, data URL'e çevir, sıradaki mesaja iliştir. */
   async function handleFile(e: ChangeEvent<HTMLInputElement>) {
@@ -423,17 +434,39 @@ export default function Home() {
     };
   }, [panelWidth]);
 
-  // Önizlemeden gelen düzenlemeleri dinle.
+  // Önizlemeden gelen düzenlemeleri ve bölüm seçimini dinle.
   useEffect(() => {
     function onMessage(e: MessageEvent) {
-      if (e.data?.type !== "rukible:html") return;
-      if (typeof e.data.html !== "string") return;
-      editedRef.current = e.data.html;
-      setDirty(true);
+      if (e.data?.type === "rukible:html" && typeof e.data.html === "string") {
+        editedRef.current = e.data.html;
+        setDirty(true);
+        return;
+      }
+      if (e.data?.type === "rukible:selected") {
+        const d = e.data as SectionSelection;
+        setSelection({
+          tag: d.tag,
+          label: d.label,
+          selector: d.selector,
+          text: d.text,
+          html: d.html,
+        });
+        // Bir bölüm seçildi: seç modundan çık, kullanıcı isteğini yazsın.
+        setPickMode(false);
+        previewRef.current?.contentWindow?.postMessage("rukible:pick:off", "*");
+      }
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, []);
+
+  // "Seç" modu açık/kapalı bilgisini önizlemeye ilet.
+  useEffect(() => {
+    previewRef.current?.contentWindow?.postMessage(
+      pickMode ? "rukible:pick:on" : "rukible:pick:off",
+      "*",
+    );
+  }, [pickMode]);
 
   /** Harcama özetini tazeler — açılışta ve her üretimden sonra. */
   const refreshUsage = useCallback(() => {
@@ -608,6 +641,11 @@ export default function Home() {
     // "Uygula" düğmesi asBuild=true geçer: seçili mod ne olursa olsun Build çalışır.
     const activeMode: "build" | "plan" = asBuild ? "build" : mode;
 
+    // Seçili bölümü bu gönderim için sabitle, rozeti hemen temizle. Yalnız
+    // düzenleme (build + mevcut sayfa) anlamlı; plan/ilk üretimde yok say.
+    selectionRef.current = activeMode === "build" && html ? selection : null;
+    setSelection(null);
+
     setError(null);
     setNotes([]);
     setCost(null);
@@ -636,6 +674,7 @@ export default function Home() {
       const steps = parseSteps(text);
       if (steps.length >= 2) {
         await applyStepwise(steps, text, nextMessages);
+        selectionRef.current = null; // seçim tüketildi (adım adım yol)
         return;
       }
     }
@@ -658,6 +697,7 @@ export default function Home() {
           mode: activeMode === "plan" ? "plan" : undefined,
           images: imgs.length ? imgs : undefined,
           style,
+          selection: selectionRef.current ?? undefined,
         }),
         signal: controller.signal,
       });
@@ -874,6 +914,7 @@ export default function Home() {
       setStreaming(false);
       setStatus("");
       setPlanDraft(""); // yarım kalan plan taslağını temizle
+      selectionRef.current = null; // seçim bu gönderimle tüketildi
       refreshUsage();
     }
   }
@@ -910,6 +951,7 @@ export default function Home() {
         currentHtml: baseHtml || undefined,
         mode: reqMode,
         images: images?.length ? images : undefined,
+        selection: selectionRef.current ?? undefined,
       }),
       signal,
     });
@@ -1561,6 +1603,22 @@ export default function Home() {
                 </span>
               </div>
             )}
+            {selection && (
+              <div className="mb-1 flex items-center gap-2 rounded-xl bg-orange-100/70 px-2.5 py-1.5">
+                <span className="text-[12px]">🎯</span>
+                <span className="min-w-0 flex-1 truncate text-[11.5px] text-stone-600">
+                  Seçili: <span className="font-medium">{selection.label}</span>
+                  {selection.text ? ` · "${selection.text.slice(0, 40)}"` : ""}
+                </span>
+                <button
+                  onClick={() => setSelection(null)}
+                  title="Seçimi temizle (tüm sayfaya uygula)"
+                  className="shrink-0 rounded px-1 text-[13px] leading-none text-stone-400 transition hover:text-rose-600"
+                >
+                  ×
+                </button>
+              </div>
+            )}
             <textarea
               ref={inputRef}
               value={input}
@@ -1638,6 +1696,19 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-3 text-xs">
+            {!editMode && html && (
+              <button
+                onClick={() => setPickMode((v) => !v)}
+                title="Bir bölüm seç; sonraki istek yalnız o bölüme uygulanır"
+                className={`rounded-xl px-3 py-1.5 text-[12.5px] font-medium transition ${
+                  pickMode
+                    ? "bg-orange-400 text-[#fff] hover:bg-orange-500"
+                    : "bg-white text-stone-700 shadow-[0_1px_2px_rgba(120,80,60,0.06)] hover:bg-orange-100 hover:text-stone-900"
+                }`}
+              >
+                {pickMode ? "🎯 Seçiliyor…" : "🎯 Seç"}
+              </button>
+            )}
             {editMode ? (
               <span className="flex items-center gap-2">
                 <span className="text-[11.5px] text-orange-500">
@@ -1761,9 +1832,20 @@ export default function Home() {
             }`}
           >
             <iframe
+              ref={previewRef}
               title="Önizleme"
               srcDoc={html ? previewDoc(html, editMode) : EMPTY_STATE}
               sandbox="allow-scripts"
+              onLoad={() => {
+                // srcDoc değişince iframe yeniden yüklenir; seç modu açıksa
+                // yeni belgeye tekrar bildir.
+                if (pickMode) {
+                  previewRef.current?.contentWindow?.postMessage(
+                    "rukible:pick:on",
+                    "*",
+                  );
+                }
+              }}
               className={`h-full w-full rounded-3xl bg-white shadow-[0_2px_16px_rgba(120,80,60,0.08)] transition-opacity duration-500 ${
                 streaming ? "opacity-40" : "opacity-100"
               }`}

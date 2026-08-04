@@ -17,6 +17,7 @@ import {
 } from "@/lib/prompt";
 import { chooseEffort } from "@/lib/intent";
 import { extractUrls, fetchPageProfile, profileToPrompt } from "@/lib/fetchPage";
+import { selectionInstruction, type SectionSelection } from "@/lib/sectionPicker";
 import { line } from "@/lib/ndjson";
 
 // Uzun üretimler için gerekli (Vercel'de varsayılan limit çok kısa).
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
     mode?: string;
     images?: string[];
     style?: string;
+    selection?: SectionSelection;
   };
   try {
     body = await req.json();
@@ -141,6 +143,18 @@ export async function POST(req: Request) {
         content: "Sayfayı aldım. Değişiklik isteğini SEARCH/REPLACE olarak döneceğim.",
       });
     }
+  }
+
+  // Kullanıcı sayfadan bir bölüm seçtiyse (yalnız düzenleme akışlarında anlamlı):
+  // modele "sadece bu bölümü değiştir, SEARCH bloklarını buradan çıkar" de.
+  const selInstr =
+    (isEdit || isFullEdit) ? selectionInstruction(body.selection) : "";
+  if (selInstr) {
+    conversation.push({ role: "user", content: selInstr });
+    conversation.push({
+      role: "assistant",
+      content: "Anlaşıldı, değişikliği yalnız o bölüme uygulayacağım.",
+    });
   }
 
   conversation.push(...messages);
