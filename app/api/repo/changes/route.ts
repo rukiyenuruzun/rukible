@@ -1,5 +1,12 @@
 import { projectDir, isValidProjectId, readTextFile, workdirExists } from "@/lib/workspace";
-import { statusChanges, diffFile } from "@/lib/git";
+import {
+  diffFile,
+  diffFileRefs,
+  diffNameStatus,
+  shallowBaseSha,
+  untrackedFiles,
+  type GitChange,
+} from "@/lib/git";
 import { REPO_MODE_ENABLED } from "@/lib/config";
 
 export const runtime = "nodejs";
@@ -16,7 +23,13 @@ export type RepoChange = {
 
 /**
  * GET /api/repo/changes?projectId=...
- * Klondan bu yana değişen dosyaları (git status/diff) döner.
+ * KLONDAN BU YANA değişen dosyaları döner (klon tabanı ↔ çalışma ağacı).
+ *
+ * Not: yalnızca commit'lenmemiş değişikliklere (git status) bakmıyoruz. Ajan her
+ * turu bir "sürüm" olarak commit'liyor (bkz. sürüm geçmişi); o yüzden çalışma
+ * ağacı çoğu zaman TEMİZ olur ama klona göre epey değişmiştir. Bu yüzden farkı
+ * sığ klon tabanına (shallowBaseSha) göre alıyoruz — "Değişenler" == push'un
+ * göndereceği == taban..çalışma. Böylece checkpoint'lerden bağımsız, kararlı.
  */
 export async function GET(req: Request) {
   if (!REPO_MODE_ENABLED) {
@@ -34,15 +47,30 @@ export async function GET(req: Request) {
   const cwd = projectDir(projectId);
 
   try {
-    const changes = (await statusChanges(cwd)).slice(0, MAX_FILES);
-    const files: RepoChange[] = [];
+    const base = await shallowBaseSha(cwd);
 
-    for (const c of changes) {
+    // Tabana göre izlenen dosya değişiklikleri (commit'li + commit'siz karışık).
+    const tracked = base ? await diffNameStatus(cwd, [base]) : [];
+    // Hâlâ izlenmeyen (yeni eklenmiş, henüz hiç commit olmamış) dosyalar.
+    const trackedPaths = new Set(tracked.map((c) => c.path));
+    const untracked = (await untrackedFiles(cwd)).filter(
+      (p) => !trackedPaths.has(p),
+    );
+
+    const combined: Array<GitChange & { untracked?: boolean }> = [
+      ...tracked,
+      ...untracked.map((p) => ({ path: p, status: "added" as const, untracked: true })),
+    ].slice(0, MAX_FILES);
+
+    const files: RepoChange[] = [];
+    for (const c of combined) {
       const item: RepoChange = { path: c.path, status: c.status };
 
-      // Diff (silinenlerde de git diff anlamlı; eklenenlerde --no-index).
+      // Diff: izlenmeyen dosyada /dev/null'a karşı; izlenende tabana karşı.
       try {
-        item.diff = await diffFile(cwd, c.path, c.status === "added");
+        item.diff = c.untracked
+          ? await diffFile(cwd, c.path, true)
+          : await diffFileRefs(cwd, [base], c.path);
       } catch {
         item.diff = undefined;
       }

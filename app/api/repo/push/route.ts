@@ -7,6 +7,7 @@ import {
   remoteUrl,
   resetMixed,
   revParse,
+  shallowBaseSha,
   statusChanges,
 } from "@/lib/git";
 import { isValidProjectId, projectDir, workdirExists } from "@/lib/workspace";
@@ -80,8 +81,18 @@ export async function POST(req: Request) {
     return await withRepoLock(projectId, async () => {
       const cwd = projectDir(projectId);
 
-      const changes = await statusChanges(cwd);
-      if (changes.length === 0) {
+      // Ajan turları zaten "sürüm" olarak commit'li olabilir; klona göre bir şey
+      // değişip değişmediğini ÇALIŞMA AĞACI değil KLON TABANI belirler.
+      const base = await shallowBaseSha(cwd);
+      const oldHead = await revParse(cwd, "HEAD");
+
+      // Commit'lenmemiş (elle yapılmış) düzenlemeleri tek commit'e katla; böylece
+      // push'a dahil olurlar. Kontrol noktaları zaten commit'li — onlara dokunmaz.
+      const dirty = await statusChanges(cwd);
+      if (dirty.length > 0) await commitAll(cwd, message);
+
+      const head = await revParse(cwd, "HEAD");
+      if (head === base) {
         return new Response("Gönderilecek değişiklik yok.", { status: 400 });
       }
 
@@ -105,13 +116,12 @@ export async function POST(req: Request) {
       }
 
       const defaultBranch = await currentBranch(cwd);
-      const oldHead = await revParse(cwd, "HEAD");
-      const sha = await commitAll(cwd, message);
 
       try {
         await pushHeadTo(cwd, pushUrl, branch);
       } catch (err) {
-        // Commit'i geri al ki "Değişenler" görünümü push öncesiyle aynı kalsın.
+        // Yalnız KATLAMA commit'ini geri al (kontrol noktaları kalsın); elle
+        // düzenlemeler push öncesindeki gibi çalışma ağacında görünür kalsın.
         await resetMixed(cwd, oldHead).catch(() => {});
         const e = err as NodeJS.ErrnoException & { stderr?: string };
         const detail = scrub(e.stderr || e.message || "bilinmeyen hata", token);
@@ -133,7 +143,7 @@ export async function POST(req: Request) {
       return NextResponse.json({
         ok: true,
         branch,
-        sha: sha.slice(0, 7),
+        sha: head.slice(0, 7),
         direct: branch === defaultBranch,
         prUrl,
       });

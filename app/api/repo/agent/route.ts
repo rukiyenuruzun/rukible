@@ -16,8 +16,9 @@ import {
   runTool,
   toolLabel,
 } from "@/lib/repoTools";
-import { isValidProjectId, workdirExists } from "@/lib/workspace";
+import { isValidProjectId, projectDir, workdirExists } from "@/lib/workspace";
 import { withRepoLock } from "@/lib/repoLock";
+import { commitAllIfChanged } from "@/lib/git";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -266,6 +267,27 @@ export async function POST(req: Request) {
                 n: "Model hiçbir dosyayı değiştirmedi. İsteği daha somut yaz (hangi dosya/bölüm, ne değişsin) ya da tekrar dene.",
               }),
             );
+          }
+
+          // Bu turda dosya değiştiyse turu bir SÜRÜM (kontrol noktası) olarak
+          // commit'le: kullanıcı sürüm geçmişinden geri dönebilsin / iki sürüm
+          // arası fark alabilsin. Mesaj = kullanıcının bu turdaki isteği. Commit
+          // doğrudan .git'e yazar (sandbox dosya araçlarından bağımsız); klon
+          // tabanı sığ kök olarak sabit kaldığı için taban..HEAD hep "klondan
+          // bu yana"yı verir. Hata olursa sessiz geç — değişiklikler yine
+          // çalışma ağacında durur, yalnız o tur ayrı sürüm olmaz.
+          if (!isPlan && yazilanDosya > 0) {
+            try {
+              const lastUser = [...messages]
+                .reverse()
+                .find((m) => m.role === "user");
+              const label =
+                (lastUser?.content ?? "").trim().split("\n")[0].slice(0, 100) ||
+                "Rukible düzenlemesi";
+              await commitAllIfChanged(projectDir(projectId), label);
+            } catch {
+              // kontrol noktası oluşturulamadı — kritik değil
+            }
           }
         });
       } catch (err) {

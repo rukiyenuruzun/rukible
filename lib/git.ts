@@ -99,6 +99,141 @@ export async function commitAll(cwd: string, message: string): Promise<string> {
   return revParse(cwd, "HEAD");
 }
 
+/**
+ * commitAll gibi ama değişiklik yoksa commit denemez (git boş commit'i hata
+ * sayar). Bir şey commit'lendiyse yeni SHA'yı, hiçbir şey değişmemişse null
+ * döner. Ajan turu / geri alma öncesi "kontrol noktası" için kullanılır.
+ */
+export async function commitAllIfChanged(
+  cwd: string,
+  message: string,
+): Promise<string | null> {
+  await run(["add", "-A"], { cwd });
+  const { stdout } = await run(["status", "--porcelain"], { cwd });
+  if (!stdout.trim()) return null; // sahne boş — commit'lenecek şey yok
+  await run(
+    ["-c", "user.name=Rukible", "-c", "user.email=rukible@localhost", "commit", "-m", message],
+    { cwd },
+  );
+  return revParse(cwd, "HEAD");
+}
+
+/**
+ * Sığ (depth-1) klonun taban commit'i. Sığ klonda sınır commit'i yerel repoda
+ * EBEVEYNSİZ (kök) görünür; üstüne attığımız kontrol noktalarının ebeveyni olur.
+ * Böylece "klon anındaki ilk hâl" her zaman `--max-parents=0` ile bulunur —
+ * klon rotasına dokunmadan, mevcut çalışma klasörlerinde de çalışır.
+ */
+export async function shallowBaseSha(cwd: string): Promise<string> {
+  const { stdout } = await run(["rev-list", "--max-parents=0", "HEAD"], { cwd });
+  const roots = stdout.trim().split("\n").filter(Boolean);
+  // Tek kök beklenir; birden çoksa en eskisini (son satır) al.
+  return roots[roots.length - 1] ?? "";
+}
+
+/**
+ * Hedef sürüme (sha) "döner" ama YIKICI DEĞİL: hiçbir sürümü silmez. Hedefin
+ * ağacını çalışma kopyasına getirip HEAD'in ÜSTÜNE yeni bir kontrol noktası
+ * olarak commit'ler. Böylece ileri geçmiş korunur (istenirse tekrar ileri
+ * gidilebilir), tıpkı /yeni'deki sürüm geri yüklemesi gibi.
+ *
+ * Adımlar: (1) commit'siz elle düzenlemeleri önce kaydet (kaybolmasın),
+ * (2) reset --hard <sha> ile ağacı hedefe getir, (3) reset --soft <oldHead> ile
+ * HEAD'i geri al (ağaç hedefte kalır, fark index'te evrelenir), (4) fark varsa
+ * commit. Dönen değer yeni HEAD (hiç fark yoksa oldHead — no-op).
+ */
+export async function revertToVersion(
+  cwd: string,
+  sha: string,
+  message: string,
+): Promise<string> {
+  await commitAllIfChanged(cwd, "Geri alma öncesi otomatik kayıt");
+  const oldHead = await revParse(cwd, "HEAD");
+  await run(["reset", "--hard", sha], { cwd });
+  await run(["reset", "--soft", oldHead], { cwd });
+  const { stdout } = await run(["status", "--porcelain"], { cwd });
+  if (!stdout.trim()) return oldHead; // zaten o içerikteyiz — değişiklik yok
+  await run(
+    ["-c", "user.name=Rukible", "-c", "user.email=rukible@localhost", "commit", "-m", message],
+    { cwd },
+  );
+  return revParse(cwd, "HEAD");
+}
+
+export type CommitInfo = { sha: string; at: number; message: string };
+
+/**
+ * `range` (ör. "<base>..HEAD") aralığındaki commit'leri YENİDEN→ESKİYE döner.
+ * Alanlar arasında \x1f, satırlar arasında \x1e ayırıcısı (mesajda newline
+ * olabildiği için güvenli sınırlayıcı).
+ */
+export async function logRange(
+  cwd: string,
+  range: string,
+): Promise<CommitInfo[]> {
+  const { stdout } = await run(
+    ["log", "--format=%H%x1f%ct%x1f%s%x1e", range],
+    { cwd },
+  );
+  const out: CommitInfo[] = [];
+  for (const rec of stdout.split("\x1e")) {
+    const line = rec.replace(/^\n/, "");
+    if (!line.trim()) continue;
+    const [sha, at, ...rest] = line.split("\x1f");
+    if (!sha) continue;
+    out.push({ sha, at: Number(at) || 0, message: rest.join("\x1f") });
+  }
+  return out;
+}
+
+/**
+ * `git diff --name-status <refs...>` çıktısını değişen dosya listesine çevirir.
+ * refs = ["<base>"] (taban↔çalışma ağacı) ya da ["<from>", "<to>"] (iki commit).
+ */
+export async function diffNameStatus(
+  cwd: string,
+  refs: string[],
+): Promise<GitChange[]> {
+  const { stdout } = await run(
+    ["diff", "--name-status", "--find-renames", ...refs],
+    { cwd },
+  );
+  const changes: GitChange[] = [];
+  for (const raw of stdout.split("\n")) {
+    if (!raw.trim()) continue;
+    const parts = raw.split("\t");
+    const code = parts[0] ?? "";
+    // Yeniden adlandırma/kopyalama (R100, C75): son alan YENİ yol.
+    const file = parts[parts.length - 1] ?? "";
+    if (!file) continue;
+    let status: GitFileStatus = "modified";
+    if (code.startsWith("A")) status = "added";
+    else if (code.startsWith("D")) status = "deleted";
+    else if (code.startsWith("R") || code.startsWith("C")) status = "added";
+    changes.push({ path: file, status });
+  }
+  return changes;
+}
+
+/**
+ * Tek dosyanın iki ref (ya da taban↔çalışma ağacı) arasındaki unified diff'i.
+ * `refs` diffFile ile aynı mantık: git diff <refs...> -- <file>.
+ */
+export async function diffFileRefs(
+  cwd: string,
+  refs: string[],
+  file: string,
+): Promise<string> {
+  try {
+    const { stdout } = await run(["diff", ...refs, "--", file], { cwd });
+    return stdout;
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException & { stdout?: string };
+    if (typeof e.stdout === "string" && e.stdout) return e.stdout;
+    return "";
+  }
+}
+
 /** Commit'i geri alır ama dosya değişikliklerini çalışma ağacında bırakır. */
 export async function resetMixed(cwd: string, sha: string): Promise<void> {
   await run(["reset", "--mixed", sha], { cwd });
@@ -145,6 +280,18 @@ export async function statusChanges(cwd: string): Promise<GitChange[]> {
     changes.push({ path: file, status });
   }
   return changes;
+}
+
+/** İzlenmeyen (henüz git'e hiç girmemiş) dosyalar — göreli yollar. */
+export async function untrackedFiles(cwd: string): Promise<string[]> {
+  const { stdout } = await run(
+    ["ls-files", "--others", "--exclude-standard"],
+    { cwd },
+  );
+  return stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 /** Tek bir dosyanın unified diff'i. İzlenmeyen dosyalarda /dev/null'a karşı. */

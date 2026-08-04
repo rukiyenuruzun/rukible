@@ -31,6 +31,10 @@ type RepoChange = {
   content?: string;
 };
 type TreeEntry = { path: string; type: "file" | "dir"; size?: number };
+/** Sürüm geçmişi girdisi (git kontrol noktası ya da klon tabanı). */
+type RepoVersion = { sha: string; short: string; message: string; at: number };
+/** Sürüm farkı: içerik yok, yalnız diff (indirme gerekmez). */
+type VerDiffFile = { path: string; status: RepoChange["status"]; diff?: string };
 
 /** Repoda sunulabilir statik bir HTML girişi var mı? */
 function hasStaticEntry(tree: TreeEntry[]): boolean {
@@ -97,6 +101,38 @@ function statusChip(s: RepoChange["status"]) {
   return { label: "~ değişti", cls: "bg-amber-100 text-amber-700" };
 }
 
+/** Unix saniyeyi "3 dk önce" gibi kısa göreli metne çevirir (server saatinden). */
+function agoLabel(at: number, nowMs: number): string {
+  if (!at) return "";
+  const s = Math.max(0, Math.floor(nowMs / 1000 - at));
+  if (s < 60) return "az önce";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} dk önce`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} sa önce`;
+  const d = Math.floor(h / 24);
+  return `${d} gün önce`;
+}
+
+/** Diff metnini renkli satırlara böler (Değişenler ve Sürümler'de ortak). */
+function DiffBody({ diff }: { diff: string }) {
+  return (
+    <pre className="text-[12px] leading-relaxed">
+      {diff.split("\n").map((ln, j) => {
+        let cls = "text-stone-500";
+        if (ln.startsWith("+") && !ln.startsWith("+++")) cls = "text-emerald-600";
+        else if (ln.startsWith("-") && !ln.startsWith("---")) cls = "text-rose-600";
+        else if (ln.startsWith("@@")) cls = "text-orange-500";
+        return (
+          <div key={j} className={cls}>
+            {ln || " "}
+          </div>
+        );
+      })}
+    </pre>
+  );
+}
+
 export default function RepoStudio({
   initialProjectId,
 }: {
@@ -120,7 +156,9 @@ export default function RepoStudio({
   // save_image ile projeye birebir kaydedebilsin.
   const [pendingImages, setPendingImages] = useState<string[]>([]);
 
-  const [tab, setTab] = useState<"preview" | "changes" | "files">("preview");
+  const [tab, setTab] = useState<
+    "preview" | "changes" | "files" | "versions"
+  >("preview");
 
   // Elle dosya düzenleme
   const [editPath, setEditPath] = useState("");
@@ -165,6 +203,27 @@ export default function RepoStudio({
     text: string;
     prUrl?: string | null;
   } | null>(null);
+
+  // Sürüm geçmişi (Sürümler sekmesi). Her ajan turu bir "sürüm" (git kontrol
+  // noktası); taban = klonun ilk hâli. Geri alma yıkıcı değil (yeni sürüm).
+  const [versions, setVersions] = useState<RepoVersion[]>([]);
+  const [baseVersion, setBaseVersion] = useState<RepoVersion | null>(null);
+  const [headSha, setHeadSha] = useState("");
+  const [confirmRevert, setConfirmRevert] = useState<string | null>(null);
+  const [revertBusy, setRevertBusy] = useState<string | null>(null);
+  // Karşılaştırma: iki sürüm seçilince arasındaki fark gösterilir.
+  const [compareMode, setCompareMode] = useState(false);
+  const [cmpA, setCmpA] = useState<string | null>(null);
+  const [cmpB, setCmpB] = useState<string | null>(null);
+  const [verDiff, setVerDiff] = useState<VerDiffFile[] | null>(null);
+  const [verDiffBusy, setVerDiffBusy] = useState(false);
+  const [verSelected, setVerSelected] = useState(0);
+  const [verActive, setVerActive] = useState<string | null>(null);
+  // Göreli zaman etiketleri için "şimdi". Sunucuda 0 (sürüm listesi boş, DOM'a
+  // düşmez); istemcide gerçek saat. Dakikada bir tazelenir (aşağıdaki effect).
+  const [nowMs, setNowMs] = useState<number>(() =>
+    typeof window === "undefined" ? 0 : Date.now(),
+  );
 
   // Boş durum (proje seçili değil): klonlama ekranı
   const [cloneUrl, setCloneUrl] = useState("");
@@ -254,6 +313,33 @@ export default function RepoStudio({
       // yoksay
     }
   }, []);
+
+  const loadVersions = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/repo/versions?projectId=${id}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setVersions(data.versions ?? []);
+      setBaseVersion(data.base ?? null);
+      setHeadSha(data.headSha ?? "");
+    } catch {
+      // yoksay
+    }
+  }, []);
+
+  // Göreli zaman etiketlerini dakikada bir tazele (setState yalnız callback'te).
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Sürümler sekmesine girilince listeyi tazele (tembel yükleme).
+  useEffect(() => {
+    if (tab !== "versions" || !projectId) return;
+    void (async () => {
+      await loadVersions(projectId);
+    })();
+  }, [tab, projectId, loadVersions]);
 
   const clearDevPoll = useCallback(() => {
     if (devPollRef.current) {
@@ -677,10 +763,11 @@ export default function RepoStudio({
       saveChatToDb(projectId, finalMsgs);
       void loadUsage(); // kalan krediyi tazele
 
-      // Sadece build modunda dosya değişir → önizlemeyi tazele + diff getir.
+      // Sadece build modunda dosya değişir → önizlemeyi tazele + diff + sürüm.
       if (useMode === "build") {
         setPreviewKey((k) => k + 1);
         await refreshChanges(projectId);
+        void loadVersions(projectId); // bu tur yeni bir sürüm (kontrol noktası)
       }
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
@@ -760,12 +847,65 @@ export default function RepoStudio({
         prUrl: d.prUrl,
       });
       setPushMsg("");
-      // Commit sonrası fark kalmaz; liste boşalır.
+      // Push, artakalan elle düzenlemeleri bir sürüme katlayabilir → tazele.
       await refreshChanges(projectId);
+      void loadVersions(projectId);
     } catch (e) {
       setPushNote({ tone: "err", text: (e as Error).message ?? "Push başarısız." });
     } finally {
       setPushBusy(false);
+    }
+  }
+
+  /** İki sürüm arasındaki farkı getirir (from→to; to yoksa HEAD). */
+  async function loadVersionDiff(from: string, to: string) {
+    if (!projectId) return;
+    setVerDiffBusy(true);
+    setVerSelected(0);
+    try {
+      const res = await fetch(
+        `/api/repo/versions?projectId=${projectId}&from=${from}&to=${to}`,
+      );
+      if (!res.ok) {
+        setVerDiff([]);
+        return;
+      }
+      const data = await res.json();
+      setVerDiff(data.files ?? []);
+    } catch {
+      setVerDiff([]);
+    } finally {
+      setVerDiffBusy(false);
+    }
+  }
+
+  /** Bir sürüme döner (yıkıcı değil: yeni kontrol noktası). Sonra tazeler. */
+  async function revertTo(sha: string) {
+    if (!projectId || revertBusy) return;
+    setRevertBusy(sha);
+    setConfirmRevert(null);
+    setError("");
+    try {
+      const res = await fetch("/api/repo/versions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, sha }),
+      });
+      if (!res.ok) {
+        setError(await res.text());
+        return;
+      }
+      setVerDiff(null);
+      setVerActive(null);
+      setCompareMode(false);
+      setCmpA(null);
+      setCmpB(null);
+      setPreviewKey((k) => k + 1);
+      await Promise.all([loadVersions(projectId), refreshChanges(projectId)]);
+    } catch (e) {
+      setError((e as Error).message ?? "Geri alınamadı.");
+    } finally {
+      setRevertBusy(null);
     }
   }
 
@@ -898,6 +1038,87 @@ export default function RepoStudio({
 
   // ---------- ÇALIŞMA ALANI ----------
   const selectedChange = changes[selected];
+
+  // Sürüm listesi (yeni → eski) + en altta klon tabanı. Numara: en yeni en
+  // büyük (v3, v2, v1, Başlangıç). Her satırın "ebeveyni" bir sonraki (daha
+  // eski) sürüm — o sürümün GETİRDİĞİ farkı göstermek için.
+  const allVersions: {
+    v: RepoVersion;
+    label: string;
+    isBase: boolean;
+    isHead: boolean;
+    parentSha: string | null;
+  }[] = [
+    ...versions.map((v, i) => ({
+      v,
+      label: `v${versions.length - i}`,
+      isBase: false,
+      isHead: v.sha === headSha,
+      parentSha:
+        i < versions.length - 1 ? versions[i + 1].sha : baseVersion?.sha ?? null,
+    })),
+    ...(baseVersion
+      ? [
+          {
+            v: baseVersion,
+            label: "Başlangıç",
+            isBase: true,
+            isHead: baseVersion.sha === headSha,
+            parentSha: null,
+          },
+        ]
+      : []),
+  ];
+  const verSelectedFile = verDiff?.[verSelected];
+
+  /** Karşılaştırma modunda A/B seçer; ikisi de dolunca farkı yükler. */
+  function pickCompare(sha: string) {
+    let a = cmpA;
+    let b = cmpB;
+    if (a === sha) {
+      setCmpA(null);
+      setVerDiff(null);
+      return;
+    }
+    if (b === sha) {
+      setCmpB(null);
+      setVerDiff(null);
+      return;
+    }
+    if (!a) {
+      setCmpA(sha);
+      a = sha;
+    } else if (!b) {
+      setCmpB(sha);
+      b = sha;
+    } else {
+      // ikisi de doluyken üçüncü seçim → yeni karşılaştırma başlat
+      setCmpA(sha);
+      setCmpB(null);
+      setVerDiff(null);
+      return;
+    }
+    if (a && b) {
+      const idx = (s: string) => allVersions.findIndex((e) => e.v.sha === s);
+      // büyük index = daha eski = farkın "from"u.
+      const [from, to] = idx(a) > idx(b) ? [a, b] : [b, a];
+      void loadVersionDiff(from, to);
+    }
+  }
+
+  /** Bir sürüme tıklayınca: karşılaştırmada A/B; normalde o sürümün farkı. */
+  function selectVersion(entry: (typeof allVersions)[number]) {
+    if (compareMode) {
+      pickCompare(entry.v.sha);
+      return;
+    }
+    setVerActive(entry.v.sha);
+    if (!entry.parentSha) {
+      setVerDiff([]); // taban: klonun ilk hâli, öncesi yok
+      return;
+    }
+    void loadVersionDiff(entry.parentSha, entry.v.sha);
+  }
   const devFw = detectFramework(tree);
   // Önizleme kaynağı:
   //  - LOKAL erişimde (localhost) ÇERÇEVE PROXY'sine bağlanır: dev sunucusunu
@@ -1255,6 +1476,16 @@ export default function RepoStudio({
             >
               Değişenler{changes.length > 0 ? ` (${changes.length})` : ""}
             </button>
+            <button
+              onClick={() => setTab("versions")}
+              className={`rounded-full px-3 py-1 transition ${
+                tab === "versions"
+                  ? "bg-orange-400 text-[#fff]"
+                  : "text-stone-400 hover:text-stone-600"
+              }`}
+            >
+              Sürümler{versions.length > 0 ? ` (${versions.length})` : ""}
+            </button>
           </div>
           {tab === "preview" && (
             <div className="flex items-center gap-2">
@@ -1547,7 +1778,7 @@ export default function RepoStudio({
                 )}
               </div>
             </div>
-          ) : (
+          ) : tab === "changes" ? (
             <div className="flex h-full flex-col">
               {/* Commit & Push çubuğu */}
               <div className="flex items-center gap-2 border-b border-stone-100 px-3 py-2">
@@ -1661,29 +1892,196 @@ export default function RepoStudio({
                       </span>
                     </div>
                     <div className="min-h-0 flex-1 overflow-auto p-3">
-                      <pre className="text-[12px] leading-relaxed">
-                        {(selectedChange.diff || "(fark gösterilemiyor)")
-                          .split("\n")
-                          .map((ln, j) => {
-                            let cls = "text-stone-500";
-                            if (ln.startsWith("+") && !ln.startsWith("+++"))
-                              cls = "text-emerald-600";
-                            else if (ln.startsWith("-") && !ln.startsWith("---"))
-                              cls = "text-rose-600";
-                            else if (ln.startsWith("@@")) cls = "text-orange-500";
-                            return (
-                              <div key={j} className={cls}>
-                                {ln || " "}
-                              </div>
-                            );
-                          })}
-                      </pre>
+                      <DiffBody diff={selectedChange.diff || "(fark gösterilemiyor)"} />
                     </div>
                   </>
                 ) : (
                   <p className="p-4 text-[12px] text-stone-400">Bir dosya seç.</p>
                 )}
               </div>
+              </div>
+            </div>
+          ) : (
+            /* SÜRÜMLER: her ajan turu bir git kontrol noktası. Geri al (yıkıcı
+               değil, yeni sürüm) + iki sürüm arası fark. */
+            <div className="flex h-full flex-col">
+              <div className="flex items-center justify-between gap-2 border-b border-stone-100 px-3 py-2">
+                <span className="text-[12px] text-stone-500">
+                  Sürüm geçmişi
+                  {allVersions.length ? ` · ${allVersions.length} kayıt` : ""}
+                </span>
+                <button
+                  onClick={() => {
+                    setCompareMode((v) => !v);
+                    setCmpA(null);
+                    setCmpB(null);
+                    setVerActive(null);
+                    setVerDiff(null);
+                  }}
+                  className={`rounded-lg px-2.5 py-1 text-[11.5px] transition ${
+                    compareMode
+                      ? "bg-orange-400 text-[#fff]"
+                      : "bg-white text-stone-600 hover:bg-orange-50"
+                  }`}
+                >
+                  {compareMode ? "Karşılaştırmayı kapat" : "⇄ Karşılaştır"}
+                </button>
+              </div>
+              {compareMode && (
+                <p className="border-b border-stone-100 bg-orange-50/40 px-3 py-1.5 text-[11.5px] text-stone-500">
+                  İki sürüm seç · A {cmpA ? "✓" : "—"} · B {cmpB ? "✓" : "—"}
+                </p>
+              )}
+
+              <div className="flex min-h-0 flex-1">
+                {/* sürüm listesi */}
+                <div className="w-72 shrink-0 overflow-y-auto border-r border-stone-100 p-2">
+                  {allVersions.length === 0 && (
+                    <p className="p-2 text-[12px] text-stone-400">
+                      Henüz sürüm yok. Sohbetle bir değişiklik yap; her tur bir
+                      sürüm olarak buraya düşer.
+                    </p>
+                  )}
+                  <div className="space-y-1">
+                    {allVersions.map((entry) => {
+                      const sha = entry.v.sha;
+                      const pickLabel =
+                        cmpA === sha ? "A" : cmpB === sha ? "B" : "";
+                      const highlight = compareMode
+                        ? !!pickLabel
+                        : verActive === sha;
+                      return (
+                        <div
+                          key={sha}
+                          className={`rounded-lg px-2 py-1.5 transition ${
+                            highlight
+                              ? "bg-orange-100 ring-1 ring-orange-300"
+                              : "hover:bg-orange-50"
+                          }`}
+                        >
+                          <button
+                            onClick={() => selectVersion(entry)}
+                            className="block w-full text-left"
+                            title={entry.v.message}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[12px] font-medium text-stone-700">
+                                {entry.label}
+                              </span>
+                              {entry.isHead && (
+                                <span className="rounded bg-emerald-100 px-1 text-[10px] text-emerald-700">
+                                  ● şu an
+                                </span>
+                              )}
+                              {pickLabel && (
+                                <span className="rounded bg-orange-400 px-1 text-[10px] text-[#fff]">
+                                  {pickLabel}
+                                </span>
+                              )}
+                              <span className="ml-auto shrink-0 text-[10.5px] text-stone-400">
+                                {agoLabel(entry.v.at, nowMs)}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 truncate text-[11.5px] text-stone-500">
+                              {entry.isBase
+                                ? "Klonun ilk hâli"
+                                : entry.v.message || "(mesaj yok)"}
+                            </p>
+                          </button>
+
+                          {!entry.isHead &&
+                            !compareMode &&
+                            (confirmRevert === sha ? (
+                              <div className="mt-1 flex items-center gap-1 text-[11px]">
+                                <span className="text-stone-500">
+                                  Bu sürüme dönülsün mü?
+                                </span>
+                                <button
+                                  onClick={() => revertTo(sha)}
+                                  disabled={revertBusy != null}
+                                  className="rounded bg-orange-400 px-1.5 py-0.5 font-medium text-[#fff] transition hover:bg-orange-500 disabled:opacity-40"
+                                >
+                                  {revertBusy === sha ? "…" : "dön"}
+                                </button>
+                                <button
+                                  onClick={() => setConfirmRevert(null)}
+                                  className="rounded px-1.5 py-0.5 text-stone-500 transition hover:text-stone-800"
+                                >
+                                  vazgeç
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setConfirmRevert(sha)}
+                                className="mt-1 text-[11px] text-stone-400 transition hover:text-orange-500"
+                              >
+                                ↩ Bu sürüme dön
+                              </button>
+                            ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* fark paneli */}
+                <div className="flex min-w-0 flex-1 flex-col">
+                  {verDiffBusy ? (
+                    <p className="p-4 text-[12px] text-stone-400">
+                      Fark hesaplanıyor…
+                    </p>
+                  ) : verDiff === null ? (
+                    <div className="grid h-full place-items-center px-6 text-center">
+                      <p className="max-w-[280px] text-[12px] leading-relaxed text-stone-400">
+                        {compareMode
+                          ? "İki sürüm seç; aralarındaki fark burada görünür."
+                          : "Soldan bir sürüm seç; o turda ne değiştiğini burada göster. “↩ Bu sürüme dön” ile o hâle geri dönebilirsin."}
+                      </p>
+                    </div>
+                  ) : verDiff.length === 0 ? (
+                    <p className="p-4 text-[12px] text-stone-400">
+                      Bu iki sürüm arasında fark yok.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap gap-1 border-b border-stone-100 p-2">
+                        {verDiff.map((f, i) => {
+                          const chip = statusChip(f.status);
+                          return (
+                            <button
+                              key={f.path}
+                              onClick={() => setVerSelected(i)}
+                              title={f.path}
+                              className={`max-w-[220px] truncate rounded-lg px-2 py-1 text-[11.5px] transition ${
+                                i === verSelected
+                                  ? "bg-orange-100 text-stone-900"
+                                  : "text-stone-600 hover:bg-orange-50"
+                              }`}
+                            >
+                              <span
+                                className={`mr-1 rounded px-1 text-[10px] ${chip.cls}`}
+                              >
+                                {chip.label}
+                              </span>
+                              {f.path.split("/").pop()}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="min-h-0 flex-1 overflow-auto p-3">
+                        {verSelectedFile ? (
+                          <DiffBody
+                            diff={verSelectedFile.diff || "(fark gösterilemiyor)"}
+                          />
+                        ) : (
+                          <p className="text-[12px] text-stone-400">
+                            Bir dosya seç.
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           )}
