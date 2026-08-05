@@ -1,13 +1,21 @@
 /**
- * MODEL AYARI
+ * SAĞLAYICI + MODEL AYARI
  *
- * Modeli değiştirmek için sadece aşağıdaki satırı değiştir.
- * OpenRouter'daki tüm modeller çalışır: https://openrouter.ai/models
+ * Sağlayıcı OpenAI-UYUMLU herhangi bir endpoint olabilir (OpenRouter, Qwen/
+ * Alibaba MaaS, ...). Adres ve anahtar `.env.local`'den gelir — anahtar ASLA
+ * koda yazılmaz. Kod varsayılanı OpenRouter/Kimi'dir; başka sağlayıcıya geçmek
+ * için SADECE `.env.local` düzenlenir (kod değişmez). Örn. Qwen'e geçiş:
+ *   LLM_BASE_URL=https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+ *   LLM_API_KEY=sk-...
+ *   MODEL=qwen3.8-max
+ *   AGENT_MODEL=qwen3.8-max
+ * (Qwen bilinmeyen alanları — provider/reasoning — yok sayar; tool-calling ve
+ * streaming çalışır. Test edildi.)
  *
- * Örnekler:
- *   "moonshotai/kimi-k3"        -> multimodal, 1M context ($3 / $15 per 1M token)
- *   "moonshotai/kimi-k2.7-code" -> kodlamaya özel, ~4x ucuz ($0.85 / $3.8)
- *   "anthropic/claude-opus-4-8" -> tasarım kalitesi en yüksek, daha pahalı
+ * Model örnekleri:
+ *   "qwen3.8-max"               -> Qwen (Alibaba), tool-calling + multimodal
+ *   "moonshotai/kimi-k3"        -> OpenRouter, multimodal, 1M context
+ *   "anthropic/claude-opus-4-8" -> OpenRouter, tasarım kalitesi en yüksek
  */
 export const MODEL = process.env.MODEL ?? "moonshotai/kimi-k3";
 
@@ -94,7 +102,23 @@ export const MAX_PLAN_TOKENS = 2000;
 export const REASONING_EFFORT = "low";
 export const REASONING_EFFORT_HARD = "medium";
 
-export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+/**
+ * LLM endpoint'i (OpenAI-uyumlu). `.env.local` içindeki LLM_BASE_URL ile
+ * değiştirilir; boşsa OpenRouter. Ad geriye dönük uyumluluk için OPENROUTER_*
+ * kaldı ama artık herhangi bir sağlayıcıyı gösterebilir.
+ */
+export const OPENROUTER_BASE_URL =
+  process.env.LLM_BASE_URL ?? "https://openrouter.ai/api/v1";
+
+/**
+ * LLM anahtarı — SADECE .env.local'den. Yeni ad LLM_API_KEY; eski OPENROUTER_API_KEY
+ * hâlâ yedek olarak okunur (geriye dönük). Rotalar bunu kullanır.
+ */
+export const LLM_API_KEY =
+  process.env.LLM_API_KEY ?? process.env.OPENROUTER_API_KEY ?? "";
+
+/** Aktif sağlayıcı gerçekten OpenRouter mı? Krediyi (kullanım) yalnız o zaman sorgula. */
+export const IS_OPENROUTER = OPENROUTER_BASE_URL.includes("openrouter.ai");
 
 /**
  * OpenRouter sağlayıcı tercihi (istek gövdesindeki `provider` alanı).

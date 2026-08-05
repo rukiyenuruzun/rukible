@@ -299,7 +299,20 @@ export async function workdirExists(projectId: string): Promise<boolean> {
   }
 }
 
-/** Çalışma klasörünü tümüyle siler (yeniden klonlama / proje silme). */
+/**
+ * Çalışma klasörünü tümüyle siler (yeniden klonlama / proje silme).
+ *
+ * Dev sunucusu daha yeni durdurulmuş olabilir ve `.next`'e yazan bir alt süreç
+ * dosyaları kısa süre KİLİTLİ tutabilir → tek seferlik rm yarım kalıp diskte
+ * artık klasör bırakır. fs.rm'in kendi retry'ı (maxRetries/retryDelay)
+ * EBUSY/ENOTEMPTY/EPERM/ENOTDIR durumlarında bekleyip tekrar dener; yine de
+ * silinemezse HATA FIRLATIR (çağıran yakalayıp kullanıcıya bildirir).
+ */
 export async function removeWorkdir(projectId: string): Promise<void> {
-  await fs.rm(projectDir(projectId), { recursive: true, force: true });
+  await fs.rm(projectDir(projectId), {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 150,
+  });
 }

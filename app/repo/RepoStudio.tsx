@@ -134,6 +134,36 @@ function DiffBody({ diff }: { diff: string }) {
   );
 }
 
+/** Bir dev-log satırının rengini içeriğine göre seçer (koyu konsol üstünde). */
+function logLineClass(l: string): string {
+  if (/(^|[\s✗×])(error|failed|exception|cannot|hata|ENOENT|EADDRINUSE)\b/i.test(l))
+    return "text-rose-300";
+  if (/\b(warn|warning|deprecat|uyar)/i.test(l)) return "text-amber-300";
+  if (/(^|\s)(✓|ready|compiled|success|hazır|listening|started)\b/i.test(l))
+    return "text-emerald-300";
+  if (/^\s*\$ /.test(l)) return "text-sky-300";
+  return "text-[#d7d2e0]";
+}
+
+/** Bir dev satırı hata/uyarı işareti taşıyor mu (nokta göstergesi için). */
+function isErrorLog(l: string): boolean {
+  return /(^|[\s✗×])(error|failed|exception|cannot|hata|ENOENT|EADDRINUSE)\b/i.test(l);
+}
+
+/** Renkli dev-log gövdesi (kurulum/hata ekranları + canlı panel ortak kullanır). */
+function DevLogLines({ logs }: { logs: string[] }) {
+  if (logs.length === 0) return <span className="text-stone-500">Log yok…</span>;
+  return (
+    <>
+      {logs.map((l, i) => (
+        <div key={i} className={logLineClass(l)}>
+          {l || " "}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export default function RepoStudio({
   initialProjectId,
 }: {
@@ -194,6 +224,10 @@ export default function RepoStudio({
   const [lanIp, setLanIp] = useState<string | null>(null);
   const [devLogs, setDevLogs] = useState<string[]>([]);
   const [devError, setDevError] = useState("");
+  // Log paneli açık mı (ready iken iframe'in altında dock). Kopyalama ✓'i ayrı.
+  const [showLogs, setShowLogs] = useState(false);
+  const [logsCopied, setLogsCopied] = useState(false);
+  const logBoxRef = useRef<HTMLPreElement>(null);
   const devPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [changes, setChanges] = useState<RepoChange[]>([]);
   const [selected, setSelected] = useState(0);
@@ -375,6 +409,41 @@ export default function RepoStudio({
       "*",
     );
   }, [pickMode, tab]);
+
+  // Log paneli açıkken CANLI takip: normal poll "ready"de duruyor (iframe aldı),
+  // ama panel açıkken çalışma-anı loglarını ve olası çökmeyi (status→error)
+  // görmek için 3 sn'de bir tazele. Yalnız panel açık + sunucu ayaktayken çalışır.
+  useEffect(() => {
+    if (!showLogs || !projectId) return;
+    if (devStatus !== "ready" && devStatus !== "starting" && devStatus !== "installing")
+      return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/repo/dev?projectId=${projectId}`);
+        if (!r.ok || !alive) return;
+        const d = await r.json();
+        if (!alive) return;
+        if (Array.isArray(d.logs)) setDevLogs(d.logs);
+        if (d.status) setDevStatus(d.status);
+        if (d.error) setDevError(d.error);
+      } catch {
+        // yoksay
+      }
+    };
+    const iv = setInterval(tick, 3000);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, [showLogs, projectId, devStatus]);
+
+  // Yeni log geldikçe paneli en alta kaydır (setState yok — sadece DOM).
+  useEffect(() => {
+    if (showLogs && logBoxRef.current) {
+      logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight;
+    }
+  }, [devLogs, showLogs]);
 
   const clearDevPoll = useCallback(() => {
     if (devPollRef.current) {
@@ -850,9 +919,20 @@ export default function RepoStudio({
 
   async function removeProject(id: string) {
     setConfirmDelete(null);
+    setCloneError("");
     await fetch(`/api/projects/${id}`, { method: "DELETE" }).catch(() => {});
-    await fetch(`/api/repo/clone?projectId=${id}`, { method: "DELETE" }).catch(() => {});
+    // Klon klasörünü diskten sil. Başarısız olursa (kilitli dosya vб.) sessiz
+    // geçme — kullanıcı diskte artık kaldığını bilsin.
+    const res = await fetch(`/api/repo/clone?projectId=${id}`, {
+      method: "DELETE",
+    }).catch(() => null);
     setProjects((prev) => prev.filter((p) => p.id !== id));
+    if (!res || !res.ok) {
+      setCloneError(
+        "Proje listeden kaldırıldı ama klon klasörü diskten tam silinemedi. " +
+          "Önizleme çalışıyorsa durdurup tekrar sil.",
+      );
+    }
   }
 
   function applyPlan(planText: string) {
@@ -956,7 +1036,7 @@ export default function RepoStudio({
         <ThemeToggle className="fixed right-5 top-5 grid h-9 w-9 place-items-center rounded-full bg-white text-[16px] shadow-[0_1px_3px_rgba(120,80,60,0.12)] transition hover:bg-orange-50" />
         <div className="w-full max-w-[440px]">
           <div className="mb-8 flex flex-col items-center text-center">
-            <Logo size={92} />
+            <Logo size={92} href="/" />
             <div className="mt-3 text-2xl font-semibold tracking-tight text-stone-800">
               Repo üstünden düzenle
             </div>
@@ -1063,12 +1143,12 @@ export default function RepoStudio({
             </div>
           )}
 
-          <div className="mt-6 text-center">
+          <div className="mt-6 flex justify-center">
             <Link
               href="/"
-              className="text-[12.5px] text-stone-400 transition hover:text-orange-500"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-[12.5px] font-medium text-stone-600 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50 hover:text-orange-500"
             >
-              ← Başa dön
+              <span aria-hidden="true">←</span> Ana sayfa
             </Link>
           </div>
         </div>
@@ -1160,6 +1240,8 @@ export default function RepoStudio({
     void loadVersionDiff(entry.parentSha, entry.v.sha);
   }
   const devFw = detectFramework(tree);
+  // Loglarda hata/uyarı işareti var mı → "Loglar" düğmesinde kırmızı nokta.
+  const logHasError = devLogs.some(isErrorLog);
   // Önizleme kaynağı:
   //  - LOKAL erişimde (localhost) ÇERÇEVE PROXY'sine bağlanır: dev sunucusunu
   //    birebir aynı yollarla sunar → uygulama native çalışır (HMR, hydration,
@@ -1206,23 +1288,20 @@ export default function RepoStudio({
       <section style={{ width: panelWidth }} className="flex shrink-0 flex-col overflow-hidden">
         <header className="px-7 py-6">
           <div className="flex items-center gap-3">
-            <Logo size={38} />
-            <div className="min-w-0 leading-none">
+            {/* Logo artık ana sayfa bağlantısı — ayrı "Başa dön" tuşuna gerek yok. */}
+            <Logo size={38} href="/" />
+            <div className="min-w-0 flex-1 leading-none">
               <div className="truncate text-[17px] font-semibold tracking-tight text-stone-800">
                 {title || "Proje"}
               </div>
               <div className="mt-1 truncate text-[11px] text-stone-400">{repoUrl}</div>
             </div>
+            <ThemeToggle className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white text-[15px] shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50" />
           </div>
 
-          <div className="mt-4 flex items-center gap-2">
-            <Link
-              href="/"
-              className="rounded-xl bg-white px-3 py-1.5 text-[12px] font-medium text-stone-600 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50"
-            >
-              ← Başa dön
-            </Link>
-            <ThemeToggle className="grid h-8 w-8 place-items-center rounded-xl bg-white text-[14px] shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50" />
+          {/* Hafif metin eylemleri (eski dört pil yerine): proje listesine dön +
+              yeniden klonla. Logo zaten ana sayfaya götürüyor. */}
+          <div className="mt-4 flex items-center gap-3 text-[12px]">
             <button
               onClick={() => {
                 clearDevPoll();
@@ -1235,17 +1314,23 @@ export default function RepoStudio({
                 setMessages([]);
                 loadProjects();
               }}
-              className="rounded-xl bg-white px-3 py-1.5 text-[12px] font-medium text-stone-600 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50"
+              className="group flex items-center gap-1 font-medium text-stone-600 transition hover:text-orange-500"
             >
-              Başka proje
+              <span aria-hidden="true" className="transition group-hover:-translate-x-0.5">
+                ‹
+              </span>
+              Projeler
             </button>
+            <span className="text-stone-300" aria-hidden="true">
+              ·
+            </span>
             <button
               onClick={reclone}
               disabled={cloning || streaming}
-              title="Repoyu yeniden klonla (değişiklikleri sıfırlar)"
-              className="rounded-xl bg-white px-3 py-1.5 text-[12px] font-medium text-stone-500 shadow-[0_1px_2px_rgba(120,80,60,0.06)] transition hover:bg-orange-50 disabled:opacity-40"
+              title="Repoyu yeniden klonla (yerel değişiklikleri sıfırlar)"
+              className="flex items-center gap-1 text-stone-400 transition hover:text-stone-700 disabled:opacity-40"
             >
-              ↻
+              <span aria-hidden="true">↻</span> Yeniden klonla
             </button>
           </div>
         </header>
@@ -1385,7 +1470,7 @@ export default function RepoStudio({
                 className="hidden"
               />
             </div>
-            <span className="shrink-0 text-[11px] text-stone-400">
+            <span className="shrink-0 text-[11px] tabular-nums text-stone-400">
               {usage?.kalan != null && (
                 <span
                   className={
@@ -1395,8 +1480,16 @@ export default function RepoStudio({
                   Kalan ${usage.kalan.toFixed(2)}
                 </span>
               )}
-              {cost > 0 && ` · bu oturum $${cost.toFixed(4)}`}
-              {tokens > 0 && ` · ${tokens.toLocaleString()} tk`}
+              {(() => {
+                // Kalan bakiye yoksa (ör. Qwen) sadece harcananı göster — baştaki
+                // " · " sarkmasın diye parçaları temiz birleştir.
+                const parts = [
+                  cost > 0 ? `bu oturum $${cost.toFixed(4)}` : null,
+                  tokens > 0 ? `${tokens.toLocaleString("tr-TR")} token` : null,
+                ].filter(Boolean);
+                if (parts.length === 0) return null;
+                return (usage?.kalan != null ? " · " : "") + parts.join(" · ");
+              })()}
             </span>
           </div>
           <div className="rounded-2xl bg-white p-2 shadow-[0_1px_3px_rgba(120,80,60,0.08)]">
@@ -1650,6 +1743,22 @@ export default function RepoStudio({
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
                     {devStatus === "ready" && devPort && (
+                      <button
+                        onClick={() => setShowLogs((v) => !v)}
+                        title="Dev sunucusu loglarını göster/gizle"
+                        className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11.5px] transition ${
+                          showLogs
+                            ? "bg-orange-400 text-[#fff] hover:bg-orange-500"
+                            : "bg-white text-stone-600 hover:bg-orange-50"
+                        }`}
+                      >
+                        Loglar
+                        {logHasError && !showLogs && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                        )}
+                      </button>
+                    )}
+                    {devStatus === "ready" && devPort && (
                       <a
                         href={previewSrc || "#"}
                         target="_blank"
@@ -1681,31 +1790,78 @@ export default function RepoStudio({
 
                 {/* gövde */}
                 {devStatus === "ready" && devPort ? (
-                  <div
-                    className={`flex min-h-0 flex-1 ${
-                      mobileView
-                        ? "justify-center overflow-auto bg-stone-100/60 p-4"
-                        : ""
-                    }`}
-                  >
-                    <iframe
-                      key={previewKey}
-                      ref={previewRef}
-                      src={previewSrc}
-                      onLoad={() => {
-                        if (pickMode)
-                          previewRef.current?.contentWindow?.postMessage(
-                            "rukible:pick:on",
-                            "*",
-                          );
-                      }}
-                      className={`min-h-0 border-0 transition-all ${
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <div
+                      className={`flex min-h-0 flex-1 ${
                         mobileView
-                          ? "h-full w-[390px] shrink-0 rounded-2xl shadow-[0_2px_16px_rgba(120,80,60,0.12)]"
-                          : "w-full flex-1"
+                          ? "justify-center overflow-auto bg-stone-100/60 p-4"
+                          : ""
                       }`}
-                      title="Önizleme"
-                    />
+                    >
+                      <iframe
+                        key={previewKey}
+                        ref={previewRef}
+                        src={previewSrc}
+                        onLoad={() => {
+                          if (pickMode)
+                            previewRef.current?.contentWindow?.postMessage(
+                              "rukible:pick:on",
+                              "*",
+                            );
+                        }}
+                        className={`min-h-0 border-0 transition-all ${
+                          mobileView
+                            ? "h-full w-[390px] shrink-0 rounded-2xl shadow-[0_2px_16px_rgba(120,80,60,0.12)]"
+                            : "w-full flex-1"
+                        }`}
+                        title="Önizleme"
+                      />
+                    </div>
+
+                    {/* Canlı log dock'u (iframe'in altında; çalışırken patlarsa
+                        neden patladığını burada görürsün). */}
+                    {showLogs && (
+                      <div className="flex h-56 shrink-0 flex-col border-t border-stone-200">
+                        <div className="flex items-center justify-between gap-2 bg-[#0d0a16]/95 px-3 py-1.5">
+                          <span className="flex items-center gap-2 text-[11.5px] text-[#b3a8c9]">
+                            Dev sunucusu logları
+                            {logHasError && (
+                              <span className="rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] text-rose-300">
+                                hata var
+                              </span>
+                            )}
+                            <span className="text-[10px] text-[#6a5a8a]">
+                              · canlı
+                            </span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-2">
+                            <button
+                              onClick={async () => {
+                                const ok = await copyText(devLogs.join("\n"));
+                                setLogsCopied(ok);
+                                if (ok) setTimeout(() => setLogsCopied(false), 2000);
+                              }}
+                              className="rounded bg-white/10 px-2 py-0.5 text-[11px] text-[#d7d2e0] transition hover:bg-white/20"
+                            >
+                              {logsCopied ? "Kopyalandı ✓" : "Kopyala"}
+                            </button>
+                            <button
+                              onClick={() => setShowLogs(false)}
+                              title="Log panelini kapat"
+                              className="rounded px-1.5 text-[13px] leading-none text-[#9a8fb2] transition hover:text-[#e7e1f3]"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        </div>
+                        <pre
+                          ref={logBoxRef}
+                          className="min-h-0 flex-1 overflow-auto bg-[#0d0a16]/95 px-3 pb-3 text-[11px] leading-relaxed"
+                        >
+                          <DevLogLines logs={devLogs} />
+                        </pre>
+                      </div>
+                    )}
                   </div>
                 ) : devStatus === "installing" || devStatus === "starting" ? (
                   <div className="flex min-h-0 flex-1 flex-col">
@@ -1714,8 +1870,8 @@ export default function RepoStudio({
                         ? "Projenin bağımlılıkları kuruluyor (ilk seferde birkaç dakika sürebilir)…"
                         : "Dev sunucusu başlatılıyor, hazır olunca site burada görünecek…"}
                     </p>
-                    <pre className="mx-4 mb-4 mt-2 min-h-0 flex-1 overflow-auto rounded-lg bg-[#0d0a16]/95 p-3 text-[11px] leading-relaxed text-[#e7e5e4]">
-                      {devLogs.join("\n") || "…"}
+                    <pre className="mx-4 mb-4 mt-2 min-h-0 flex-1 overflow-auto rounded-lg bg-[#0d0a16]/95 p-3 text-[11px] leading-relaxed">
+                      <DevLogLines logs={devLogs} />
                     </pre>
                   </div>
                 ) : (
@@ -1744,8 +1900,8 @@ export default function RepoStudio({
                         <p className="mt-3 text-[12px] text-rose-600">{devError}</p>
                       )}
                       {devLogs.length > 0 && (
-                        <pre className="mt-3 max-h-48 overflow-auto rounded-lg bg-[#0d0a16]/95 p-3 text-left text-[11px] leading-relaxed text-[#e7e5e4]">
-                          {devLogs.join("\n")}
+                        <pre className="mt-3 max-h-48 overflow-auto rounded-lg bg-[#0d0a16]/95 p-3 text-left text-[11px] leading-relaxed">
+                          <DevLogLines logs={devLogs} />
                         </pre>
                       )}
                       <p className="mt-4 text-[12px] text-stone-400">

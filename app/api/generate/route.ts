@@ -5,6 +5,7 @@ import {
   MAX_EDIT_TOKENS,
   MAX_PLAN_TOKENS,
   OPENROUTER_BASE_URL,
+  LLM_API_KEY,
   PROVIDER_PREFS,
   REASONING_EFFORT_HARD,
 } from "@/lib/config";
@@ -18,6 +19,7 @@ import {
 import { chooseEffort } from "@/lib/intent";
 import { extractUrls, fetchPageProfile, profileToPrompt } from "@/lib/fetchPage";
 import { selectionInstruction, type SectionSelection } from "@/lib/sectionPicker";
+import { llmErrorText } from "@/lib/llmError";
 import { line } from "@/lib/ndjson";
 
 // Uzun üretimler için gerekli (Vercel'de varsayılan limit çok kısa).
@@ -29,11 +31,11 @@ const MAX_URLS_PER_REQUEST = 2;
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
 export async function POST(req: Request) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = LLM_API_KEY;
 
   if (!apiKey) {
     return new Response(
-      "OPENROUTER_API_KEY tanımlı değil. .env.local dosyasına ekleyip sunucuyu yeniden başlat.",
+      "LLM_API_KEY (veya OPENROUTER_API_KEY) tanımlı değil. .env.local dosyasına ekleyip sunucuyu yeniden başlat.",
       { status: 500 },
     );
   }
@@ -220,17 +222,25 @@ export async function POST(req: Request) {
         try {
           for await (const chunk of stream) {
             const delta = chunk.choices?.[0]?.delta as
-              | { content?: string | null; reasoning?: string | null }
+              | {
+                  content?: string | null;
+                  reasoning?: string | null;
+                  reasoning_content?: string | null;
+                }
               | undefined;
 
-            if (delta?.reasoning) controller.enqueue(line({ r: delta.reasoning }));
+            // Düşünme akışı: OpenRouter `reasoning`, Qwen `reasoning_content` yollar.
+            const think = delta?.reasoning ?? delta?.reasoning_content;
+            if (think) controller.enqueue(line({ r: think }));
             if (delta?.content) controller.enqueue(line({ c: delta.content }));
 
             if (chunk.usage) controller.enqueue(line({ u: chunk.usage }));
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : "Bilinmeyen hata";
-          controller.enqueue(line({ n: `Akış hatası: ${message}` }));
+          controller.enqueue(
+            line({ n: llmErrorText(err, `Akış hatası: ${message}`) }),
+          );
         } finally {
           controller.close();
         }
@@ -245,6 +255,9 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Bilinmeyen hata";
-    return new Response(`Model çağrısı başarısız: ${message}`, { status: 502 });
+    return new Response(
+      llmErrorText(err, `Model çağrısı başarısız: ${message}`),
+      { status: 502 },
+    );
   }
 }

@@ -156,6 +156,20 @@ export async function DELETE(req: Request) {
   // Önce çalışan dev/önizleme sunucusunu durdur (yetim süreç/port kalmasın),
   // sonra klasörü sil.
   stopDevServer(projectId);
-  await removeWorkdir(projectId).catch(() => {});
+  try {
+    await removeWorkdir(projectId);
+  } catch (err) {
+    console.error("[repo/clone] removeWorkdir başarısız:", err);
+    // Yut­ma: aşağıda gerçekten gitti mi diye kontrol edip ona göre yanıt ver.
+  }
+  // DOĞRULA: fs.rm yarım kalmış olabilir (kilitli dosya). Klasör hâlâ
+  // duruyorsa sessizce "ok" deme — kullanıcı diskte artık kaldığını bilsin.
+  if (await workdirExists(projectId)) {
+    return new Response(
+      "Klon klasörü tam silinemedi (önizleme hâlâ çalışıyor olabilir). " +
+        "Önizlemeyi durdurup tekrar dene.",
+      { status: 500 },
+    );
+  }
   return Response.json({ ok: true });
 }

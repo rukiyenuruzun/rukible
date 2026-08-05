@@ -302,6 +302,9 @@ export default function Home() {
   const [status, setStatus] = useState("");
   const [notes, setNotes] = useState<string[]>([]);
   const [cost, setCost] = useState<number | null>(null);
+  // Bu oturumda harcanan toplam token (ileri sayaç). Sağlayıcı kalan bakiyeyi
+  // vermediği için "kalan" gösteremiyoruz; en azından tüketimi biriktiriyoruz.
+  const [tokens, setTokens] = useState(0);
 
   // Build: mesaj sayfayı değiştirir. Plan: model sadece ne yapılacağını konuşur,
   // sayfaya dokunulmaz; çıkan planın altındaki "Uygula" ile Build'e geçirilir.
@@ -730,7 +733,7 @@ export default function Home() {
             r?: string;
             n?: string;
             m?: "create" | "edit" | "plan";
-            u?: { cost?: number };
+            u?: { cost?: number; total_tokens?: number };
           };
           try {
             msg = JSON.parse(raw);
@@ -745,6 +748,7 @@ export default function Home() {
             spent = msg.u.cost;
             setCost(msg.u.cost);
           }
+          if (msg.u?.total_tokens) setTokens((t) => t + msg.u!.total_tokens!);
           if (msg.c) {
             accumulated += msg.c;
             if (serverMode === "plan") {
@@ -971,7 +975,11 @@ export default function Home() {
       buffer = lines.pop() ?? "";
       for (const raw of lines) {
         if (!raw.trim()) continue;
-        let msg: { c?: string; n?: string; u?: { cost?: number } };
+        let msg: {
+          c?: string;
+          n?: string;
+          u?: { cost?: number; total_tokens?: number };
+        };
         try {
           msg = JSON.parse(raw);
         } catch {
@@ -980,6 +988,7 @@ export default function Home() {
         if (msg.c) content += msg.c;
         if (msg.n) setNotes((prev) => [...prev, msg.n!]);
         if (msg.u?.cost != null) cost = msg.u.cost;
+        if (msg.u?.total_tokens) setTokens((t) => t + msg.u!.total_tokens!);
       }
     }
     return { content, cost };
@@ -1250,7 +1259,7 @@ export default function Home() {
         <header className="relative px-7 py-6">
           <ThemeToggle className="absolute right-6 top-6 grid h-8 w-8 place-items-center rounded-full bg-white text-[15px] shadow-[0_1px_3px_rgba(120,80,60,0.12)] transition hover:bg-orange-50" />
           <div className="flex items-center gap-4">
-            <Logo size={46} />
+            <Logo size={46} href="/" />
             <div className="leading-none">
               <div className="text-[23px] font-semibold tracking-tight text-stone-800">
                 Rukible
@@ -1458,6 +1467,15 @@ export default function Home() {
             </p>
           )}
         </div>
+
+        {/* Minik token sayacı (bu oturumda harcanan). Sağlayıcı kalan bakiyeyi
+            vermediği için "kalan" değil, "harcanan" gösteriyoruz. */}
+        {tokens > 0 && (
+          <div className="px-7 pb-2 text-right text-[11px] tabular-nums text-stone-400">
+            bu oturum · {tokens.toLocaleString("tr-TR")} token
+            {cost != null && cost > 0 && ` · $${cost.toFixed(4)}`}
+          </div>
+        )}
 
         {/* Harcama — her zaman görünür, tıklayınca ayrıntı açılır. */}
         {usage?.kalan != null && (

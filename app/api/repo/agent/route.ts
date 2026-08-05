@@ -3,6 +3,7 @@ import {
   AGENT_MODEL,
   MAX_AGENT_TOKENS,
   OPENROUTER_BASE_URL,
+  LLM_API_KEY,
   PROVIDER_PREFS,
   REPO_LIMITS,
   REPO_MODE_ENABLED,
@@ -20,6 +21,7 @@ import { isValidProjectId, projectDir, workdirExists } from "@/lib/workspace";
 import { withRepoLock } from "@/lib/repoLock";
 import { commitAllIfChanged } from "@/lib/git";
 import { selectionInstruction, type SectionSelection } from "@/lib/sectionPicker";
+import { llmErrorText } from "@/lib/llmError";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,9 +43,11 @@ export async function POST(req: Request) {
     return new Response("Repo modu bu ortamda kapalı.", { status: 503 });
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = LLM_API_KEY;
   if (!apiKey) {
-    return new Response("OPENROUTER_API_KEY tanımlı değil.", { status: 500 });
+    return new Response("LLM_API_KEY (veya OPENROUTER_API_KEY) tanımlı değil.", {
+      status: 500,
+    });
   }
 
   let body: {
@@ -300,7 +304,9 @@ export async function POST(req: Request) {
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : "bilinmeyen hata";
-        controller.enqueue(line({ n: `Ajan hatası: ${message}` }));
+        controller.enqueue(
+          line({ n: llmErrorText(err, `Ajan hatası: ${message}`) }),
+        );
       } finally {
         controller.enqueue(line({ u: usage }));
         controller.close();

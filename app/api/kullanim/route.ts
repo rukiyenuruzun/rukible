@@ -1,4 +1,5 @@
 import { getDb } from "@/lib/db";
+import { LLM_API_KEY, IS_OPENROUTER } from "@/lib/config";
 
 /**
  * Harcama özeti.
@@ -21,8 +22,10 @@ export async function GET() {
     araclaHarcanan?: number;
   } = {};
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (apiKey) {
+  // Kredi/bakiye yalnızca OpenRouter'a özgü. Başka sağlayıcıda (ör. Qwen) bu
+  // uç yok — anahtarı boşuna (ve yanlış tarafa) göndermemek için atla.
+  const apiKey = LLM_API_KEY;
+  if (apiKey && IS_OPENROUTER) {
     try {
       const res = await fetch("https://openrouter.ai/api/v1/key", {
         headers: { Authorization: `Bearer ${apiKey}` },
